@@ -624,3 +624,61 @@ test("reset during the first loop clears memory, input and playback position", a
   await page.clock.runFor(1000);
   await expect(page.getByRole("log")).toContainText("聞こえる？");
 });
+
+test("selected responses remain usable and their markers survive reload until records are erased", async ({ page }) => {
+  await connect(page);
+  let choices = await openChoices(page);
+  const hello = choices.getByRole("button", { name: /聞こえる/ });
+  await expect(hello).not.toHaveClass(/selected-choice/);
+  await selectReply(page, /聞こえる/);
+  choices = await openChoices(page);
+  await expect(hello).toHaveClass(/selected-choice/);
+  await expect(hello).toContainText("選択済み");
+  await expect(hello).toBeEnabled();
+  await expect(hello.locator(".choice-cost")).toHaveAttribute("aria-label", "所要2秒");
+  await expect(choices.getByRole("button", { name: /誰？/ })).not.toHaveClass(/selected-choice/);
+  await selectReply(page, /聞こえる/);
+  await expect(page.getByRole("log")).toContainText("回線はまだ繋がってるよ");
+
+  await page.reload();
+  await page.getByRole("button", { name: "記録から再接続", exact: true }).click();
+  await readyForInput(page);
+  choices = await openChoices(page);
+  await expect(hello).toHaveClass(/selected-choice/);
+  await expect(hello.locator(".choice-cost")).toHaveAttribute("aria-label", "所要3秒");
+  await expect(choices.getByRole("button", { name: /誰？/ })).not.toHaveClass(/selected-choice/);
+  await hello.focus();
+  await page.keyboard.press("Enter");
+  await readyForInput(page);
+  await expect(page.getByRole("log")).toContainText("よかった");
+
+  await page.getByRole("button", { name: "操作案内", exact: true }).click();
+  await page.getByRole("button", { name: "記録を消して最初から", exact: true }).click();
+  await page.getByRole("button", { name: "消去して最初から", exact: true }).click();
+  await page.getByRole("button", { name: "接続を開始", exact: true }).click();
+  await readyForInput(page);
+  choices = await openChoices(page);
+  await expect(choices.locator(".selected-choice")).toHaveCount(0);
+});
+
+test("older records and malformed selection history restore without inventing discoveries", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "接続を開始", exact: true })).toBeEnabled();
+  await page.evaluate(() => localStorage.setItem("abyssal-7.memory.v1", JSON.stringify({ facts: ["F02", "F03"], loop: 2, seen: [] })));
+  await page.reload();
+  await page.getByRole("button", { name: "記録から再接続", exact: true }).click();
+  await readyForInput(page);
+  let choices = await openChoices(page);
+  await expect(choices.getByRole("button", { name: /第2機械室へ行って/ })).toBeEnabled();
+  await expect(choices.locator(".selected-choice")).toHaveCount(0);
+
+  await page.evaluate(() => localStorage.setItem("abyssal-7.memory.v1", JSON.stringify({ facts: [], loop: 3, seen: [], selectedActions: ["hello", "hello", "audio", "not-an-action", 1, null] })));
+  await page.reload();
+  await page.getByRole("button", { name: "記録から再接続", exact: true }).click();
+  await readyForInput(page);
+  choices = await openChoices(page);
+  await expect(choices.getByRole("button", { name: /聞こえる/ })).toHaveClass(/selected-choice/);
+  await expect(choices.getByRole("button", { name: /音声ログ|第2機械室/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "記録 00", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("abyssal-7.memory.v1")!).selectedActions)).toEqual(["hello", "audio"]);
+});

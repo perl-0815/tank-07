@@ -94,9 +94,17 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2
 .choice-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
 .choice-drawer { position: absolute; bottom: calc(100% + 10px); left: 0; right: 0; display: flex; flex-direction: column; max-height: min(520px, calc(var(--viewport-height, 100dvh) - 235px)); border: 1px solid #6b8c87; border-radius: 3px; background: #10232a; box-shadow: 0 -12px 45px #02080cbf; animation: choices-open .16s ease-out; }
 .choice-drawer[hidden] { display: none; }
-.choice-drawer-heading { flex-shrink: 0; padding: 13px 16px 11px; border-bottom: 1px solid #344e54; color: #cbddd7; font-size: 12px; }
-.choices { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #52746d transparent; padding: 0 14px 16px; scroll-padding: 12px; }
+.choice-drawer-heading { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 8px 16px; border-bottom: 1px solid #344e54; color: #cbddd7; font-size: 12px; }
+.choice-scroll-area { display: flex; flex-direction: column; min-height: 0; }
+.choices { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #72948b #0c1b22; padding: 0 14px 16px; scroll-padding: 12px; scroll-behavior: auto; }
 .choices:empty { display: none; }
+.choice-groups { display: flow-root; }
+.choice-scroll-footer { flex-shrink: 0; min-height: 34px; padding: 3px 14px; border-top: 1px solid #344e54; background: linear-gradient(#162c32, #10232a); }
+.choice-scroll-hint { display: inline-flex; justify-content: center; align-items: center; gap: 7px; min-height: 26px; padding: 2px 8px; border: 1px solid transparent; border-radius: 2px; background: none; color: #bed3ca; font-size: 10px; line-height: 1.6; }
+.choice-scroll-footer .choice-scroll-hint { width: 100%; }
+.choice-scroll-hint:hover { border-color: #5b8175; background: #234139; color: #e2f1e9; }
+.choice-scroll-hint:focus-visible, .choices:focus-visible { outline-offset: -2px; }
+.choice-scroll-footer[hidden], .choice-scroll-hint[hidden] { display: none; }
 .choice-group h3 { margin: 17px 0 9px; color: #a7bebd; font-size: 10px; font-weight: 400; letter-spacing: .08em; }
 .choice-group-items { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .choices button { display: flex; align-items: center; gap: 12px; text-align: left; background: #122129; border: 1px solid #4c646c; padding: 11px 13px; min-height: 48px; border-radius: 2px; }
@@ -106,6 +114,11 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2
 .choices button:active:not(:disabled) { transform: translateX(1px); }
 .choices button:disabled { opacity: .46; }
 .choices .record-choice { border-color: #7da99a; background: #19342f; box-shadow: inset 2px 0 #91bfaa; }
+.choices .selected-choice { color: #a2b2b9; background: #101c24; border-color: #586f79; }
+.choices .record-choice.selected-choice { background: #12251f; border-color: #57786a; box-shadow: inset 2px 0 #658878; }
+.selected-mark { margin-right: 7px; color: #a7bbaf; font: 12px var(--mono); }
+.choices .selected-choice .record-tag { color: #a4c0af; }
+.choices .selected-choice:hover:not(:disabled) { color: #ecf8f3; }
 .record-tag { display: block; font-size: 9px; line-height: 1.4; color: #b8d9c9; letter-spacing: .04em; margin-bottom: 3px; }
 .keyword-form { display: flex; align-items: center; min-height: 52px; border: 1px solid #648079; background: #09171b; border-radius: 2px; }
 .keyword-form:focus-within { border-color: #a0cfc1; box-shadow: 0 0 0 1px #91c3b83b; }
@@ -290,7 +303,7 @@ button.attachment:hover { border-color: #8ab2af; }
 .station[data-compact="true"] .command-deck { padding-top: 8px; padding-bottom: max(4px, env(safe-area-inset-bottom)); }
 .station[data-compact="true"] .choice-picker { margin-bottom: 8px; }
 .station[data-compact="true"] .choice-toggle { min-height: 40px; padding-block: 8px; }
-.station[data-compact="true"] .choice-drawer-heading { padding-block: 9px; }
+.station[data-compact="true"] .choice-drawer-heading { min-height: 38px; padding-block: 6px; }
 .station[data-compact="true"] .choices button { min-height: 44px; padding-top: 8px; padding-bottom: 8px; }
 .station[data-compact="true"] .record-tag { display: inline; margin-right: 5px; font-size: 8px; }
 .station[data-compact="true"] .keyword-form { min-height: 44px; }

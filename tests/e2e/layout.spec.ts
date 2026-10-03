@@ -224,3 +224,57 @@ test("reconnecting clears unfinished composition from the previous input", async
   await readyForInput(page);
   await expect(page.getByRole("log")).toContainText("EMERGENCY POWER ONLINE");
 });
+
+test("overflow cues reveal hidden replies and track scrolling, resizing, and keyboard navigation", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "接続を開始", exact: true }).click();
+  await readyForInput(page);
+  await openChoices(page);
+  const down = page.getByRole("button", { name: "下に続き", exact: true });
+  const up = page.getByRole("button", { name: "上に戻る", exact: true });
+  await expect(down).toBeHidden();
+  await expect(up).toBeHidden();
+
+  const input = page.getByRole("combobox", { name: "キーワード", exact: true });
+  for (const value of ["聞こえる", "7319", "水槽07", "中央管理端末", "通信回線"]) {
+    await input.fill(value);
+    await page.getByRole("button", { name: "キーワードを送信" }).click();
+    await readyForInput(page);
+  }
+  const choices = await openChoices(page);
+  await expect(down).toBeVisible();
+  await expect(up).toBeHidden();
+  await expect(down).toHaveAttribute("aria-controls", "choice-list");
+  await down.click();
+  await expect.poll(() => choices.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+  await expect(up).toBeVisible();
+  const last = choices.getByRole("button").last();
+  await last.scrollIntoViewIfNeeded();
+  await expect(last).toBeInViewport();
+  await expect(down).toBeHidden();
+  const beforeUp = await choices.evaluate((node) => node.scrollTop);
+  await up.focus();
+  await page.keyboard.press("Enter");
+  await expect.poll(() => choices.evaluate((node) => node.scrollTop)).toBeLessThan(beforeUp);
+
+  await page.setViewportSize({ width: 320, height: 640 });
+  await choices.evaluate((node) => { node.scrollTop = 0; });
+  await expect(down).toBeVisible();
+  await expect(up).toBeHidden();
+  // A single reply needs no scroll affordance, even at this narrow width.
+  await input.fill("応答を引き継ぐ");
+  await page.keyboard.press("Enter");
+  await readyForInput(page);
+  await openChoices(page);
+  await expect(down).toBeHidden();
+  await expect(up).toBeHidden();
+  await expect(choices.getByRole("button")).toHaveCount(1);
+  await page.setViewportSize({ width: 320, height: 420 });
+  // visualViewport dispatches its resize event after setViewportSize resolves.
+  await expect(input).toBeInViewport({ ratio: 1 });
+  await expectContainedByViewport(page);
+  await expect(choices.getByRole("button", { name: /引継ぎを取り消す/ })).toBeInViewport();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "選択肢を開く", exact: true })).toBeFocused();
+  await expect(choices).toBeHidden();
+});

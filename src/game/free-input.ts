@@ -26,6 +26,7 @@ export const ECHO_SCRIPT: Record<string, ScriptLine[]> = {
     s("VOLUNTARY RESPONSE HANDOVER CONFIRMED"),
     y("待って。それは、私の――"),
     s("OPERATOR RESPONSE: STORED\nNEXT RECONSTRUCTION: RESPONSE ASSIGNED"),
+    s("保存したあなたの言葉を、次の通信で『ユナ』の応答に使います。"),
     { speaker: "UNKNOWN", text: "今度は、あなたが答える", effect: "quiet" },
     s("AUX-07 / RECONSTRUCTION QUEUED"),
     y("聞こえる？"),

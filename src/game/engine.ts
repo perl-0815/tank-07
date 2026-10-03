@@ -12,7 +12,7 @@ export function createGame(): GameState {
     questionedYunaIdentity: false, messages: [], ending: null, location: "section4",
     nextMessageId: 1, triggeredEvents: [], escapeTrapAt: null,
     pressureFailureAt: null, doomed: null, hasPumpClue: false, truthClosed: false,
-    sharedFacts: [], sharedTopics: [], completedActions: [], centralAccessed: false,
+    sharedFacts: [], sharedTopics: [], completedActions: [], selectedActions: [], centralAccessed: false,
     protocolInspected: false, pressureInspected: false, commsInspected: false,
     usedForeknowledge: false, echoPending: false,
   };
@@ -55,7 +55,11 @@ function facts(state: GameState, ids: string[]): GameState {
 }
 
 function completed(state: GameState, id: string): GameState {
-  return actionTopics({ ...state, completedActions: [...new Set([...state.completedActions, id])] }, id);
+  return actionTopics({
+    ...state,
+    completedActions: [...new Set([...state.completedActions, id])],
+    selectedActions: [...new Set([...state.selectedActions, id])],
+  }, id);
 }
 
 export function startGame(state: GameState): GameState {
@@ -68,6 +72,7 @@ export function reconnect(state: GameState): GameState {
   const next = {
     ...createGame(), loopCount: state.loopCount + 1,
     knownFacts: [...state.knownFacts], hasPumpClue: state.hasPumpClue,
+    selectedActions: [...state.selectedActions],
   };
   return startGame(script(next, "reconnect"));
 }
@@ -153,7 +158,7 @@ function travelToMachine(state: GameState, departure: string): GameState {
 function requestRelease(state: GameState): GameState {
   let next = advanceTime(state, ACTIONS.request_release.cost);
   if (next.status !== "playing") return next;
-  next = script(facts({ ...next, scene: "release_confirm", centralAccessed: true }, ["F04"]), "releaseWarning");
+  next = script(completed(facts({ ...next, scene: "release_confirm", centralAccessed: true }, ["F04"]), "request_release"), "releaseWarning");
   if (!next.drainageDisabled) next = script(next, "pumpWarning");
   else next = reply(next, "先に第7区画の排水ポンプを止める手順は、もう済んでる。あとは開放の確認だけ");
   // Both warning variants explain the full procedure; preserve that discovery.
@@ -199,6 +204,9 @@ function execute(state: GameState, actionId: string, input?: string): GameState 
   if (TRUTH_ACTIONS.has(actionId) && state.truthClosed) {
     next = advanceTime(next, 3);
     return next.status === "playing" ? script(next, "truthClosed") : next;
+  }
+  if (actionId === "unknown_identity" && state.scene !== "unknown") {
+    return reply(next, "水槽からの通信……？　まだ回線が繋がっていない");
   }
   if (actionId === "request_release" || (actionId === "release" && state.scene !== "release_confirm")) return requestRelease(next);
   if ((actionId === "refuse" || actionId === "alternative") && state.scene !== "release_confirm") {
@@ -317,7 +325,6 @@ function execute(state: GameState, actionId: string, input?: string): GameState 
       return normalEnding(next);
     }
     case "unknown_identity":
-      if (state.scene !== "unknown") return reply(next, "水槽からの通信……？　まだ回線が繋がっていない");
       return script(facts({ ...next, status: "ending", scene: "ending", ending: "true" }, ["F23"]), "true");
     default:
       return next;
@@ -345,7 +352,10 @@ function freeReply(state: GameState, input: string, lines: ScriptLine[], cost: n
 function handleEchoConfirmation(state: GameState, input: string): GameState {
   const normalized = normalizeKeyword(input);
   if (ECHO_INPUT.cancel.some((alias) => normalizeKeyword(alias) === normalized)) {
-    return freeReply({ ...state, echoPending: false }, input, ECHO_SCRIPT.cancelled, ECHO_INPUT.cancelCost);
+    const next = freeReply({ ...state, echoPending: false }, input, ECHO_SCRIPT.cancelled, ECHO_INPUT.cancelCost);
+    return next.status === "playing"
+      ? { ...next, selectedActions: [...new Set([...next.selectedActions, "cancel_echo"])] }
+      : next;
   }
   if (normalized === normalizeKeyword(ECHO_INPUT.confirm)) {
     const next = advanceTime(append(state, [{ speaker: "YOU", text: input }]), ECHO_INPUT.confirmCost);
@@ -430,31 +440,35 @@ function physicallyAvailable(state: GameState, id: string): boolean {
 function asChoice(id: string, group: string, state?: GameState): Choice {
   const action = ACTIONS[id];
   const fromRecord = CHOICE_RECORDS[id] || (state && rememberedInvestigation(state, id));
-  return { id: action.id, label: action.label, cost: action.cost, group, ...(fromRecord ? { fromRecord: true } : {}) };
+  const repeating = state?.completedActions.includes(id) && REPEAT_RESPONSES[id];
+  return {
+    id: action.id, label: action.label, cost: repeating ? 2 : action.cost, group,
+    ...(fromRecord ? { fromRecord: true } : {}),
+    ...(state?.selectedActions.includes(id) ? { selected: true } : {}),
+  };
 }
 
 function availableChoices(state: GameState): Choice[] {
   return Object.entries(CHOICE_GROUPS).flatMap(([group, ids]) => ids.filter((id) => {
     if (!recordSupports(state, id) || !physicallyAvailable(state, id) || !contextSupports(state, id)) return false;
-    if (id === "hello" && state.completedActions.length > 0) return false;
-    if (id === "power_location" && state.sharedFacts.includes("F02")) return false;
-    if (id === "inspect_controls" && state.knownFacts.includes("F04")) return false;
-    if (state.completedActions.includes(id) && !["location", "pressure"].includes(id)) return false;
+    if (id === "hello" && state.completedActions.length > 0 && !state.completedActions.includes(id)) return false;
+    if (id === "power_location" && state.sharedFacts.includes("F02") && !state.completedActions.includes(id)) return false;
+    if (id === "inspect_controls" && state.knownFacts.includes("F04") && !state.completedActions.includes(id)) return false;
     return true;
   }).map((id) => asChoice(id, group, state)));
 }
 
 export function getChoices(state: GameState): Choice[] {
   if (state.status !== "playing") return [];
-  if (state.echoPending) return [asChoice("cancel_echo", "通信")];
-  if (state.scene === "unknown") return [asChoice("unknown_identity", "通信")];
-  if (state.doomed) return [asChoice("wait", "通信")];
+  if (state.echoPending) return [asChoice("cancel_echo", "通信", state)];
+  if (state.scene === "unknown") return [asChoice("unknown_identity", "通信", state)];
+  if (state.doomed) return [asChoice("wait", "通信", state)];
   if (state.scene === "release_confirm") {
     const ids = ["release", "refuse", "alternative"];
     if (!state.drainageDisabled) ids.push("pressure", "stop_pump");
     const investigations = state.questionedYunaIdentity && !state.truthClosed
       ? availableChoices(state).filter((choice) => choice.group === "調査") : [];
-    return [...ids.map((id) => asChoice(id, "解除の確認")), ...investigations];
+    return [...ids.map((id) => asChoice(id, "解除の確認", state)), ...investigations];
   }
   return availableChoices(state);
 }

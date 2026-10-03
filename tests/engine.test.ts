@@ -400,7 +400,7 @@ test("discovery reveals the relevant recorded suggestions without exposing the r
 
   game = choose(game, "inspect_controls");
   assert.equal(choice("central")?.fromRecord, true);
-  assert.equal(choice("inspect_controls"), undefined);
+  assert.equal(choice("inspect_controls")?.selected, true);
   game = choose(game, "central");
   assert.equal(choice("stop_pump"), undefined);
   game = choose(game, "protocol");
@@ -1217,6 +1217,8 @@ test("unrecognized and normal inputs during ECHO confirmation respond without ex
   }
   game = choose(game, "cancel_echo");
   assert.equal(game.echoPending, false);
+  assert.ok(game.selectedActions.includes("cancel_echo"));
+  assert.ok(!game.completedActions.includes("cancel_echo"));
   assert.deepEqual(choiceIds(game), ["hello", "name", "incident", "location"]);
   game = say(game, "7319");
   assert.equal(game.powerEnabled, true);
@@ -1313,4 +1315,80 @@ test("free-input secrets appear in diagnostic dialogue, never in action labels, 
   assert.match(newText(before, game), /応答を引き継ぐ/);
   assert.match(newText(before, game), /私がユナです/);
   assert.equal(game.echoPending, false);
+});
+
+test("selected conversation and research choices remain readable without repeating trust rewards", () => {
+  let game = choose(start(), "hello");
+  let choice = getChoices(game).find((item) => item.id === "hello");
+  assert.equal(choice?.selected, true);
+  assert.equal(choice?.cost, 2);
+  const helloTrust = game.trustYuna;
+  game = choose(game, "hello");
+  assert.equal(game.trustYuna, helloTrust);
+  game = say(game, "7319");
+  game = choose(game, "security");
+  choice = getChoices(game).find((item) => item.id === "security");
+  assert.equal(choice?.selected, true);
+  const before = game;
+  game = choose(game, "security");
+  assert.equal(game.remaining, before.remaining - choice!.cost);
+  assert.equal(game.trustYuna, before.trustYuna);
+  assert.deepEqual(game.knownFacts, before.knownFacts);
+  assert.equal(game.selectedActions.filter((id) => id === "security").length, 1);
+  assert.ok(getChoices(game).some((item) => item.id === "next_security" && !item.selected));
+});
+
+test("selection history survives reconnect while current actions, trust, and first-read costs reset", () => {
+  let game = choose(start(), "hello");
+  game = say(game, "7319");
+  game = choose(game, "security");
+  game = nextLoop(game);
+  assert.deepEqual(game.completedActions, []);
+  assert.equal(game.trustYuna, 0);
+  assert.equal(game.powerEnabled, false);
+  const hello = getChoices(game).find((item) => item.id === "hello");
+  assert.equal(hello?.selected, true);
+  assert.equal(hello?.cost, ACTIONS.hello.cost);
+  game = choose(game, "hello");
+  assert.equal(game.trustYuna, 1);
+  game = choose(game, "go_machine");
+  const power = getChoices(game).find((item) => item.id === "enable_power");
+  assert.equal(power?.selected, true);
+  game = choose(game, "enable_power");
+  assert.equal(game.powerEnabled, true);
+  assert.ok(!choiceIds(game).includes("enable_power"));
+  assert.ok(!choiceIds(game).includes("go_machine"));
+  const security = getChoices(game).find((item) => item.id === "security");
+  assert.equal(security?.selected, true);
+  assert.equal(security?.cost, ACTIONS.security.cost);
+});
+
+test("selection markers neither unlock undiscovered choices nor mark unfinished operations as read", () => {
+  const recorded = startGame({ ...createGame(), selectedActions: Object.keys(ACTIONS) });
+  assert.deepEqual(choiceIds(recorded), choiceIds(start()));
+  assert.deepEqual(recorded.knownFacts, []);
+  assert.ok(getChoices(recorded).every((item) => item.selected));
+  const unpowered = say(start(), "音声ログ");
+  assert.ok(!unpowered.selectedActions.includes("audio"));
+  const notConnected = say(start(), "君は水槽07？");
+  assert.ok(!notConnected.selectedActions.includes("unknown_identity"));
+  assert.ok(!notConnected.completedActions.includes("unknown_identity"));
+  let late = say(start(), "7319");
+  late = advanceTime(late, late.remaining - ACTIONS.security.cost);
+  late = say(late, "監視ログ");
+  assert.equal(late.status, "disconnected");
+  assert.ok(!late.selectedActions.includes("security"));
+  assert.deepEqual(createGame().selectedActions, []);
+});
+
+test("a release warning is remembered as selected without completing the release", () => {
+  let game = say(start(), "7319");
+  game = say(game, "隔離プロトコルを解除");
+  assert.ok(game.selectedActions.includes("request_release"));
+  assert.ok(!game.selectedActions.includes("release"));
+  assert.equal(game.containmentReleased, false);
+  game = nextLoop(game);
+  game = say(game, "7319");
+  assert.equal(getChoices(game).find((item) => item.id === "request_release")?.selected, true);
+  assert.equal(getChoices(game).find((item) => item.id === "request_release")?.cost, ACTIONS.request_release.cost);
 });

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { advanceTime, createGame, performAction, reconnect, startGame, submitKeyword } from "@/game/engine";
-import { FACTS } from "@/game/scenario";
+import { ACTIONS, FACTS } from "@/game/scenario";
 import type { GameState } from "@/game/types";
 
 const STORAGE_KEY = "abyssal-7.memory.v1";
@@ -32,10 +32,11 @@ export function useGame() {
         if (raw) {
           const data: unknown = JSON.parse(raw);
           if (data && typeof data === "object" && "facts" in data && "loop" in data) {
-            const memory = data as { facts: unknown; loop: unknown; started?: unknown; seen?: unknown };
+            const memory = data as { facts: unknown; loop: unknown; started?: unknown; seen?: unknown; selectedActions?: unknown };
             const facts = Array.isArray(memory.facts) ? memory.facts.filter((id): id is string => typeof id === "string" && Object.hasOwn(FACTS, id)) : [];
+            const selectedActions = Array.isArray(memory.selectedActions) ? memory.selectedActions.filter((id): id is string => typeof id === "string" && Object.hasOwn(ACTIONS, id)) : [];
             const loop = typeof memory.loop === "number" && Number.isSafeInteger(memory.loop) && memory.loop > 0 ? memory.loop : 1;
-            setGame({ ...createGame(), knownFacts: [...new Set(facts)], loopCount: Math.min(loop + (memory.started === true ? 1 : 0), 999999) });
+            setGame({ ...createGame(), knownFacts: [...new Set(facts)], selectedActions: [...new Set(selectedActions)], loopCount: Math.min(loop + (memory.started === true ? 1 : 0), 999999) });
             if (Array.isArray(memory.seen)) setSeen(new Set(memory.seen.filter((text): text is string => typeof text === "string").slice(-1500)));
           }
         }
@@ -48,9 +49,9 @@ export function useGame() {
   useEffect(() => {
     if (!ready) return;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ facts: game.knownFacts, loop: game.loopCount, started: game.status !== "idle", seen: [...seen].slice(-1500) }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ facts: game.knownFacts, loop: game.loopCount, started: game.status !== "idle", seen: [...seen].slice(-1500), selectedActions: game.selectedActions }));
     } catch { queueMicrotask(() => setSaveWarning(true)); }
-  }, [game.knownFacts, game.loopCount, game.status, seen, ready]);
+  }, [game.knownFacts, game.loopCount, game.status, game.selectedActions, seen, ready]);
 
   const elapsed = useCallback(() => {
     const now = Date.now();

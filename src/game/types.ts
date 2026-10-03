@@ -29,6 +29,8 @@ export interface Choice {
   cost: number;
   /** A suggestion inferred from the player's recorded information. */
   fromRecord?: boolean;
+  /** The player has already completed this response in a previous or current connection. */
+  selected?: boolean;
   group?: string;
 }
 
@@ -60,6 +62,8 @@ export interface GameState {
   /** Conversation topics introduced during this connection, never persisted. */
   sharedTopics: DialogueTopic[];
   completedActions: string[];
+  /** Presentation-only history; never used to authorize actions or grant information. */
+  selectedActions: string[];
   centralAccessed: boolean;
   protocolInspected: boolean;
   pressureInspected: boolean;
