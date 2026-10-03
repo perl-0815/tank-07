@@ -21,6 +21,7 @@ function say(state: GameState, text: string): GameState {
 }
 
 function choose(state: GameState, id: string): GameState {
+  assert.ok(!getChoices(state).some((choice) => choice.id === "reassure" || choice.label.includes("信じて")));
   assert.ok(
     getChoices(state).some((choice) => choice.id === id),
     `Action ${id} must be visible in scene ${state.scene}`,
@@ -167,7 +168,6 @@ function collectTankFacts(state: GameState): GameState {
 
 function collectIdentityFacts(state: GameState): GameState {
   state = choose(state, "hello");
-  state = say(state, "信じて。時間がない");
   state = say(state, "7319");
   state = choose(state, "security");
   state = choose(state, "next_security");
@@ -198,7 +198,6 @@ test("six truth facts can be learned through choices across loops and unlock int
 
 test("identity information can be used before it is recorded when trust is high", () => {
   let game = choose(start(), "hello");
-  game = say(game, "信じて。時間がない");
   assert.equal(game.knownFacts.includes("F12"), false);
   assert.equal(game.knownFacts.includes("F13"), false);
   game = say(game, "君、本当にユナ？");
@@ -632,19 +631,87 @@ test("the flat list respects unfinished discovery and confirmation boundaries", 
   assert.ok(getChoices(game).find((choice) => choice.id === "stop_pump")?.fromRecord);
 });
 
-test("reassurance can recover trust after an unexplained code without repeating the introduction", () => {
+test("checking separate surveillance records recovers trust after an unexplained code", () => {
   let game = say(start(), "7319");
+  assert.equal(game.trustYuna, -1);
   const before = game;
   game = say(game, "聞こえる");
   assert.doesNotMatch(newText(before, game), /通信が全部死んでる|あと数分/);
-  game = choose(game, "reassure");
-  assert.equal(game.trustYuna, 0);
-  game = choose(game, "reassure");
-  assert.equal(game.trustYuna, 1);
+  assert.equal(game.trustYuna, -1, "Repeating the introduction does not build trust");
   game = choose(game, "security");
+  assert.equal(game.trustYuna, 0);
   game = choose(game, "next_security");
+  assert.equal(game.trustYuna, 1);
   game = choose(game, "question_identity");
   assert.ok(game.knownFacts.includes("F21"));
+});
+
+test("each surveillance record builds trust once per connection, without carrying trust across loops", () => {
+  let game = say(start(), "7319");
+  game = choose(game, "security");
+  assert.equal(game.trustYuna, 0);
+  game = say(game, "監視ログ");
+  game = say(game, "監視ログを見る");
+  assert.equal(game.trustYuna, 0, "Replaying the same recording cannot replace checking another record");
+  game = choose(game, "next_security");
+  assert.equal(game.trustYuna, 1);
+  game = say(game, "5分前");
+  assert.equal(game.trustYuna, 1);
+
+  game = nextLoop(game);
+  assert.equal(game.trustYuna, 0);
+  assert.ok(game.knownFacts.includes("F12") && game.knownFacts.includes("F13"));
+  assert.deepEqual(game.completedActions, []);
+  game = choose(game, "go_machine");
+  game = choose(game, "enable_power");
+  assert.equal(game.trustYuna, -1);
+  game = choose(game, "security");
+  assert.equal(game.trustYuna, 0, "A remembered record can still be checked with this connection's Yuna");
+  game = choose(game, "next_security");
+  assert.equal(game.trustYuna, 1);
+  game = choose(game, "question_identity");
+  assert.ok(game.knownFacts.includes("F21"));
+});
+
+test("a recording interrupted by the deadline grants neither information nor trust", () => {
+  let game = say(start(), "7319");
+  game = advanceTime(game, game.remaining - 15);
+  const trust = game.trustYuna;
+  game = choose(game, "security");
+  assert.equal(game.status, "disconnected");
+  assert.equal(game.trustYuna, trust);
+  assert.ok(!game.completedActions.includes("security"));
+  assert.ok(!game.knownFacts.includes("F12"));
+});
+
+test("natural exploration followed by recorded buttons reaches SECRET and NORMAL without reassurance", () => {
+  let game = powerByDiscovery();
+  for (const id of ["inspect_controls", "central", "pressure", "stop_pump", "request_release", "release"]) game = choose(game, id);
+  assert.equal(game.ending, "secret");
+  game = reconnect(game);
+  for (const id of ["go_machine", "enable_power", "stop_pump", "request_release", "release"]) game = choose(game, id);
+  assert.equal(game.ending, "normal");
+  assert.equal(game.trustYuna, -1, "A low-trust rescue still completes");
+});
+
+test("button-only investigations and remembered shortcuts reach TRUE without reassurance", () => {
+  let game = powerByDiscovery();
+  for (const id of ["tank", "vitals", "audio"]) game = choose(game, id);
+  for (const fact of ["F10", "F11", "F14"]) assert.ok(game.knownFacts.includes(fact));
+
+  game = nextLoop(game);
+  for (const id of ["go_machine", "enable_power"]) game = choose(game, id);
+  assert.equal(game.trustYuna, -1);
+  for (const id of ["security", "next_security", "question_identity", "inspect_controls", "central", "pressure"]) game = choose(game, id);
+  assert.equal(game.trustYuna, 1);
+  for (const fact of ["F04", "F05", "F12", "F13", "F21"]) assert.ok(game.knownFacts.includes(fact));
+  assert.equal(game.truthClosed, false);
+
+  game = nextLoop(game);
+  for (const id of ["go_machine", "enable_power", "stop_pump", "request_release", "release", "unknown_identity"]) game = choose(game, id);
+  assert.equal(game.ending, "true");
+  assert.equal(game.loopCount, 3);
+  assert.ok(!game.completedActions.includes("reassure"));
 });
 
 test("warning knowledge survives a reload-style restoration without ephemeral flags", () => {
@@ -729,6 +796,7 @@ test("deterministic mixed action sequences preserve timer and message invariants
     else if (seed % 4 === 0) game = advanceTime(game, seed % 45 + 1);
     else game = say(game, commands[seed % commands.length]);
     assertChronological(game);
+    assert.ok(!getChoices(game).some((choice) => choice.id === "reassure" || choice.label.includes("信じて")));
   }
 });
 
@@ -749,12 +817,12 @@ test("a fresh connection only offers questions that need no prior explanation", 
   }
 });
 
-test("the urgent welcome introduces reassurance and escape but does not invent a locked door or blackout", () => {
+test("the urgent welcome introduces escape but does not invent a locked door or blackout", () => {
   for (const action of ["hello", "name"]) {
     const game = choose(start(), action);
     const ids = choiceIds(game);
-    for (const id of ["reassure", "escape", "other_people"]) assert.ok(ids.includes(id));
-    for (const id of ["break_door", "power_location", "tank_question"]) assert.ok(!ids.includes(id));
+    for (const id of ["escape", "other_people"]) assert.ok(ids.includes(id));
+    for (const id of ["reassure", "break_door", "power_location", "tank_question"]) assert.ok(!ids.includes(id));
     assert.ok(game.sharedTopics.includes("deadline"));
     assert.ok(!game.sharedTopics.includes("closed_door"));
   }
@@ -763,7 +831,8 @@ test("the urgent welcome introduces reassurance and escape but does not invent a
 test("the incident explains the blackout and tank, but F01 is not evidence of a closed door", () => {
   const game = choose(start(), "incident");
   assert.ok(game.knownFacts.includes("F01"));
-  for (const id of ["power_location", "tank_question", "reassure", "escape"]) assert.ok(choiceIds(game).includes(id));
+  for (const id of ["power_location", "tank_question", "escape"]) assert.ok(choiceIds(game).includes(id));
+  assert.ok(!choiceIds(game).includes("reassure"));
   assert.ok(!choiceIds(game).includes("break_door"));
   assert.ok(!game.sharedTopics.includes("closed_door"));
 });
@@ -792,16 +861,14 @@ test("talking about the door gives a complete exploration route without requirin
   assert.ok(game.messages.some((message) => message.text.includes("5 MIN BEFORE")));
 });
 
-test("a suspicious unexplained command supplies the context for repeated trust recovery", () => {
-  let game = start();
-  assert.ok(!choiceIds(game).includes("reassure"));
-  game = say(game, "7319");
+test("reassurance remains absent from choices even after suspicion or direct reassurance", () => {
+  let game = say(start(), "7319");
   assert.ok(game.sharedTopics.includes("suspicion"));
-  game = choose(game, "reassure");
+  assert.ok(!choiceIds(game).includes("reassure"));
+  game = say(game, "信じて");
   assert.equal(game.trustYuna, 0);
-  assert.ok(choiceIds(game).includes("reassure"));
-  game = choose(game, "reassure");
-  assert.equal(game.trustYuna, 1);
+  assert.ok(!choiceIds(game).includes("reassure"));
+  assert.ok(!choiceIds(nextLoop(game)).includes("reassure"));
 });
 
 test("current dialogue context resets, while correct recorded shortcuts remain available", () => {
@@ -841,7 +908,7 @@ test("context controls suggestions only, so hidden but meaningful direct inputs 
 test("timer announcements introduce urgency but never fabricate the closed-door conversation", () => {
   const game = advanceTime(start(), 120);
   assert.ok(game.sharedTopics.includes("deadline"));
-  assert.ok(choiceIds(game).includes("reassure"));
+  assert.ok(!choiceIds(game).includes("reassure"));
   assert.ok(!choiceIds(game).includes("break_door"));
 });
 

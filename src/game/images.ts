@@ -1,3 +1,5 @@
+import emergencyPowerTerminal from "../../public/images/emergency-power-terminal.webp";
+
 /**
  * Replaceable surveillance attachments. Keep each image ID stable when replacing
  * an asset; update its path, dimensions and alt text here as needed.
@@ -47,11 +49,12 @@ export const IMAGES: Record<string, ImageAttachment> = {
   },
   IMG_04: {
     id: "IMG_04",
-    src: "/images/emergency-power-terminal.webp",
-    width: 1672,
-    height: 941,
+    // A static import changes the asset URL when the image is replaced.
+    src: emergencyPowerTerminal.src,
+    width: emergencyPowerTerminal.width,
+    height: emergencyPowerTerminal.height,
     title: "非常電源端末",
-    alt: "薄暗い機械室に設置された非常電源端末。橙色の画面と入力盤が光っている。",
+    alt: "非常電源端末の認証画面。4桁の入力欄は空で、電源はオフライン。赤い認証エラーが表示されている。",
     camera: "TERMINAL-02",
     quality: 86,
   },

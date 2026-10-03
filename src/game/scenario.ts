@@ -91,8 +91,8 @@ export const ACTIONS: Record<string, ActionDefinition> = {
   vitals: { id: "vitals", label: "生体反応は？", cost: 8, facts: ["F14"], lines: [y("ゼロ。そんなはずない", undefined, "quiet")] },
   brighten: { id: "brighten", label: "映像を明るくして", cost: 8, lines: [y("明るさを上げた。これは……反射？", "IMG_06", "quiet")] },
   audio: { id: "audio", label: "音声ログを確認", cost: 15, facts: ["F10", "F11"], lines: [s("TANK-07 / AUDIO ARCHIVE\n『こんにちは』『ユナ』『こんにちは』"), y("……これ。私の声", undefined, "quiet"), s("VOCAL MIMICRY CONFIRMED / LANGUAGE LEARNING IN PROGRESS")] },
-  security: { id: "security", label: "監視ログを見る", cost: 15, scene: "security", facts: ["F12"], lines: [s("17 MIN BEFORE INCIDENT"), y("……私？", "IMG_07", "quiet"), p("覚えてない？"), y("行ってない", undefined, "quiet")] },
-  next_security: { id: "next_security", label: "次の映像を見る", cost: 12, facts: ["F13"], lines: [s("5 MIN BEFORE INCIDENT"), y("水槽07の前に、立ってる。ずっと動かない", "IMG_08", "quiet"), s("SUBJECT YUNA / NO RESPONSE\nVIDEO FEED INTERRUPTED", "quiet")] },
+  security: { id: "security", label: "監視ログを見る", cost: 15, scene: "security", facts: ["F12"], trust: 1, lines: [s("17 MIN BEFORE INCIDENT"), y("……私？", "IMG_07", "quiet"), p("覚えてない？"), y("行ってない。あなたにも、この記録を確かめてほしい", undefined, "quiet")] },
+  next_security: { id: "next_security", label: "次の映像を見る", cost: 12, facts: ["F13"], trust: 1, lines: [s("5 MIN BEFORE INCIDENT"), y("水槽07の前に、立ってる。ずっと動かない", "IMG_08", "quiet"), s("SUBJECT YUNA / NO RESPONSE\nVIDEO FEED INTERRUPTED", "quiet"), y("あなたにも、同じものが見えてるんだね", undefined, "quiet")] },
   question_identity: { id: "question_identity", label: "君、本当にユナ？", cost: 10, scene: "identity" },
   reassure: { id: "reassure", label: "信じて。時間がない", cost: 6, trust: 1 },
   central: { id: "central", label: "中央管理端末にアクセス", cost: 10, scene: "central", facts: ["F04"], lines: [s("CENTRAL CONTROL ONLINE\nISOLATION PROTOCOL ACTIVE"), y("機械室の端末から、中央管理に遠隔接続できた。隔離、圧力制御、通信履歴を操作できる")] },
@@ -115,7 +115,7 @@ export const ACTIONS: Record<string, ActionDefinition> = {
 
 /** Flat candidates, grouped only for presentation; no navigation actions. */
 export const CHOICE_GROUPS: Record<string, string[]> = {
-  会話: ["hello", "name", "incident", "location", "escape", "tank_question", "other_people", "break_door", "reassure", "question_identity"],
+  会話: ["hello", "name", "incident", "location", "escape", "tank_question", "other_people", "break_door", "question_identity"],
   非常電源: ["power_location", "go_machine", "find_code", "enable_power", "admin"],
   調査: ["tank", "vitals", "brighten", "audio", "security", "next_security", "comms", "history", "signal"],
   施設操作: ["inspect_controls", "central", "protocol", "pressure", "pressure_details", "stop_pump", "request_release", "maintain", "reinforce", "open_door"],
@@ -132,7 +132,6 @@ export const CHOICE_CONTEXTS: Record<string, ChoiceContextRule> = {
   tank_question: { allTopics: ["tank07"] },
   other_people: { anyTopics: ["facility", "emergency"] },
   break_door: { allTopics: ["closed_door"] },
-  reassure: { anyTopics: ["emergency", "deadline", "suspicion"] },
   question_identity: {},
   power_location: { anyTopics: ["power_outage", "emergency_power"] },
   go_machine: {},

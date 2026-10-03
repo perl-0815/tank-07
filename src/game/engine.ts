@@ -374,7 +374,7 @@ export function getChoices(state: GameState): Choice[] {
     if (id === "hello" && state.completedActions.length > 0) return false;
     if (id === "power_location" && state.sharedFacts.includes("F02")) return false;
     if (id === "inspect_controls" && state.knownFacts.includes("F04")) return false;
-    if (state.completedActions.includes(id) && !["location", "pressure"].includes(id) && !(id === "reassure" && state.trustYuna < 1)) return false;
+    if (state.completedActions.includes(id) && !["location", "pressure"].includes(id)) return false;
     return true;
   }).map((id) => asChoice(id, group)));
 }

@@ -156,6 +156,9 @@ test("recorded information reveals marked choices and supports a complete button
   await choose(/非常電源はどこ/);
   await choose(/第2機械室へ行って/, true);
   await expect(page.getByRole("log")).not.toContainText("なんで場所を知ってるの");
+  const terminalImage = page.getByRole("button", { name: "IMG_04 非常電源端末を拡大", exact: true }).getByRole("img");
+  await expect(terminalImage).toHaveAttribute("src", /\/_next\/image\?/);
+  await expect.poll(() => terminalImage.evaluate((element) => element instanceof HTMLImageElement && element.complete && element.naturalWidth > 0)).toBe(true);
   choices = await openChoices(page);
   await expect(choices.getByRole("button", { name: /7319 を入力/ })).toHaveCount(0);
   await choose(/コードを探して/);
@@ -195,7 +198,7 @@ test("suggestions reveal situational actions only after the relevant conversatio
   await choices.getByRole("button", { name: /何が起き/ }).click();
   await readyForInput(page);
   choices = await openChoices(page);
-  await expect(choices.getByRole("button", { name: /信じて/ })).toBeVisible();
+  await expect(choices.getByRole("button", { name: /信じて/ })).toHaveCount(0);
   await expect(choices.getByRole("button", { name: /非常電源はどこ/ })).toBeVisible();
   await expect(choices.getByRole("button", { name: /水槽07って何/ })).toBeVisible();
   await expect(choices.getByRole("button", { name: /扉を壊せない/ })).toHaveCount(0);
@@ -368,7 +371,7 @@ test("a retired navigation keyword does not lock subsequent valid commands", asy
   await expect(page.getByRole("log")).toContainText("EMERGENCY POWER ONLINE");
 });
 
-test("exploration, two loops, and last question complete TRUE", async ({ page }) => {
+test("investigating surveillance without reassurance completes TRUE across two loops", async ({ page }) => {
   await connect(page);
   await keyword(page, "7319");
   await keyword(page, "音声ログ");
@@ -378,12 +381,14 @@ test("exploration, two loops, and last question complete TRUE", async ({ page })
   await page.getByRole("button", { name: "再接続する", exact: true }).click();
   await page.clock.runFor(1600);
   await page.clock.resume();
+  await openChoices(page);
   await keyword(page, "7319");
-  await keyword(page, "信じて");
-  await keyword(page, "信じて");
-  await keyword(page, "監視ログ");
-  await keyword(page, "5分前");
-  await keyword(page, "君、本当にユナ？");
+  for (const name of [/監視ログを見る/, /次の映像を見る/, /君、本当にユナ？/]) {
+    const choices = await openChoices(page);
+    await choices.getByRole("button", { name }).click();
+    await readyForInput(page);
+  }
+  await expect(page.getByRole("log")).toContainText("INCIDENT BUFFER RECONSTRUCTION");
   await keyword(page, "第7区画の排水ポンプを停止");
   await keyword(page, "隔離プロトコルを解除");
   await keyword(page, "開ける");
@@ -396,6 +401,7 @@ test("exploration, two loops, and last question complete TRUE", async ({ page })
   await expect(page.getByText("TRUE END", { exact: true })).toBeVisible();
   await expect(page.getByRole("log")).toContainText("あなたに");
   await expect(page.getByRole("button", { name: /IMG_10/ })).toBeVisible();
+  await expect(page.getByRole("log").locator(".speaker-you").filter({ hasText: "信じて" })).toHaveCount(0);
 });
 
 test("brief effects clear and fast reconnection leaves controls usable", async ({ page }) => {
