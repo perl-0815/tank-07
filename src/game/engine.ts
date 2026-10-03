@@ -1,5 +1,5 @@
-import { ACTIONS, CHOICE_GROUPS, CHOICE_RECORDS, KEYWORDS, LOOP_SECONDS, SCRIPT, TRUE_FACTS } from "./scenario.ts";
-import type { Choice, GameState, ScriptLine } from "./types.ts";
+import { ACTIONS, ACTION_TOPICS, CHOICE_CONTEXTS, CHOICE_GROUPS, CHOICE_RECORDS, KEYWORDS, LOOP_SECONDS, SCRIPT, SCRIPT_TOPICS, TRUE_FACTS } from "./scenario.ts";
+import type { Choice, DialogueTopic, GameState, ScriptLine } from "./types.ts";
 
 export type { Choice, GameState, Message, Ending } from "./types.ts";
 
@@ -11,7 +11,7 @@ export function createGame(): GameState {
     questionedYunaIdentity: false, messages: [], ending: null, location: "section4",
     nextMessageId: 1, triggeredEvents: [], escapeTrapAt: null,
     pressureFailureAt: null, doomed: null, hasPumpClue: false, truthClosed: false,
-    sharedFacts: [], completedActions: [], centralAccessed: false,
+    sharedFacts: [], sharedTopics: [], completedActions: [], centralAccessed: false,
     protocolInspected: false, pressureInspected: false, commsInspected: false,
     usedForeknowledge: false,
   };
@@ -28,7 +28,16 @@ function append(state: GameState, lines: ScriptLine[]): GameState {
 }
 
 function script(state: GameState, key: string): GameState {
-  return append(state, SCRIPT[key] ?? []);
+  return shareTopics(append(state, SCRIPT[key] ?? []), SCRIPT_TOPICS[key] ?? []);
+}
+
+function shareTopics(state: GameState, topics: DialogueTopic[]): GameState {
+  if (!topics.length) return state;
+  return { ...state, sharedTopics: [...new Set([...state.sharedTopics, ...topics])] };
+}
+
+function actionTopics(state: GameState, key: string): GameState {
+  return shareTopics(state, ACTION_TOPICS[key] ?? []);
 }
 
 function reply(state: GameState, text: string, speaker: ScriptLine["speaker"] = "YUNA", imageId?: string): GameState {
@@ -45,7 +54,7 @@ function facts(state: GameState, ids: string[]): GameState {
 }
 
 function completed(state: GameState, id: string): GameState {
-  return { ...state, completedActions: [...new Set([...state.completedActions, id])] };
+  return actionTopics({ ...state, completedActions: [...new Set([...state.completedActions, id])] }, id);
 }
 
 export function startGame(state: GameState): GameState {
@@ -219,9 +228,9 @@ function execute(state: GameState, actionId: string, input?: string): GameState 
       return state.completedActions.length === 0 ? script(next, "welcome") : next;
     case "location":
       if (next.location === "machine") return reply(next, "今は第2機械室。最初にいた第4研究区画から、保守通路を通って移動した", "YUNA", "IMG_03");
-      return reply(facts(next, ["F01"]), "第4研究区画。奥の扉は閉まったまま", "YUNA", "IMG_01");
+      return reply(actionTopics(facts(next, ["F01"]), "location_section4"), "第4研究区画。奥の扉は閉まったまま", "YUNA", "IMG_01");
     case "escape":
-      return reply(next, next.powerEnabled ? "非常電源は戻った。第4区画の扉は遠隔で開けられるけど、中央の自動封鎖がまだ動いてる" : "扉がロックされてる。非常電源が戻れば開くと思う");
+      return reply(actionTopics(next, next.powerEnabled ? "escape_powered" : "escape_unpowered"), next.powerEnabled ? "非常電源は戻った。第4区画の扉は遠隔で開けられるけど、中央の自動封鎖がまだ動いてる" : "扉がロックされてる。非常電源が戻れば開くと思う");
     case "tank_question":
       if (next.trustYuna >= 1) return script(next, "tankTrusted");
       return next.powerEnabled ? reply(next, "詳しい説明は後にして。電源は戻ったから、監視映像なら確認できる") : script(next, "tankDistrust");
@@ -307,17 +316,27 @@ export function submitKeyword(state: GameState, text: string): GameState {
   let next = append(state, [{ speaker: "YOU", text: input }]);
   next = advanceTime(next, 3);
   if (next.status !== "playing") return next;
-  const hint = /^\d+$/.test(normalized)
+  const numeric = /^\d+$/.test(normalized);
+  const hint = numeric
     ? next.powerEnabled ? "非常電源はもう動いているよ。その番号で別の操作をするなら、設備名も教えて" : "その番号は認証されない。機械室の保守パネルなら、コードが残っているかもしれない"
     : !next.powerEnabled ? "うまく聞き取れなかった。場所や設備の名前を送って。まずは非常電源を探したい"
       : "操作を確認したい。『監視ログ』『中央管理端末』『圧力制御』のように、設備や指示を送って";
-  return reply(next, hint);
+  const topicKey = numeric ? next.powerEnabled ? "" : "wrong_code_unpowered" : next.powerEnabled ? "input_hint_powered" : "input_hint_unpowered";
+  return reply(actionTopics(next, topicKey), hint);
 }
 
 /** Display eligibility only; execute and keyword parsing never consult it. */
 function recordSupports(state: GameState, id: string): boolean {
   if (id === "stop_pump" && state.hasPumpClue) return true;
   return (CHOICE_RECORDS[id] ?? []).every((fact) => state.knownFacts.includes(fact));
+}
+
+/** Scene-independent conversational setup, separate from records and execution. */
+function contextSupports(state: GameState, id: string): boolean {
+  const rule = CHOICE_CONTEXTS[id];
+  if (!rule) return false;
+  return (!rule.allTopics || rule.allTopics.every((topic) => state.sharedTopics.includes(topic)))
+    && (!rule.anyTopics || rule.anyTopics.some((topic) => state.sharedTopics.includes(topic)));
 }
 
 function physicallyAvailable(state: GameState, id: string): boolean {
@@ -329,7 +348,6 @@ function physicallyAvailable(state: GameState, id: string): boolean {
   if (id === "break_door") return !state.powerEnabled && state.location === "section4";
   if (id === "central") return !state.centralAccessed;
   if (["protocol", "pressure", "comms"].includes(id)) return state.centralAccessed;
-  if (id === "pressure_details") return state.pressureInspected;
   if (id === "maintain" || id === "reinforce") return state.protocolInspected;
   if (id === "history" || id === "signal") return state.commsInspected;
   if (["vitals", "brighten", "audio"].includes(id)) return state.watchedTankLog;
@@ -352,7 +370,7 @@ export function getChoices(state: GameState): Choice[] {
     return ids.map((id) => asChoice(id, "解除の確認"));
   }
   return Object.entries(CHOICE_GROUPS).flatMap(([group, ids]) => ids.filter((id) => {
-    if (!recordSupports(state, id) || !physicallyAvailable(state, id)) return false;
+    if (!recordSupports(state, id) || !physicallyAvailable(state, id) || !contextSupports(state, id)) return false;
     if (id === "hello" && state.completedActions.length > 0) return false;
     if (id === "power_location" && state.sharedFacts.includes("F02")) return false;
     if (id === "inspect_controls" && state.knownFacts.includes("F04")) return false;

@@ -14,9 +14,22 @@ export function ChoicePicker({ choices, open, disabled, onOpenChange, onSelect }
   const toggle = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const groups = [...new Set(choices.map((choice) => choice.group ?? "応答"))];
+  const expanded = open && !disabled;
 
   useEffect(() => {
-    if (!open) return;
+    // A timer event can share new information while the drawer is open.
+    // Receive that dialogue before offering the resulting responses.
+    if (disabled && open) {
+      const focused = document.activeElement;
+      if (!document.querySelector("dialog[open]") && (focused === document.body || root.current?.contains(focused))) {
+        toggle.current?.focus({ preventScroll: true });
+      }
+      onOpenChange(false);
+    }
+  }, [disabled, open, onOpenChange]);
+
+  useEffect(() => {
+    if (!expanded) return;
     if (list.current) list.current.scrollTop = 0;
     const escape = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || document.querySelector("dialog[open]")) return;
@@ -33,15 +46,16 @@ export function ChoicePicker({ choices, open, disabled, onOpenChange, onSelect }
       document.removeEventListener("keydown", escape);
       document.removeEventListener("pointerdown", outside);
     };
-  }, [open, onOpenChange]);
+  }, [expanded, onOpenChange]);
 
   return <div className="choice-picker" ref={root}>
-    <button ref={toggle} type="button" className="choice-toggle" aria-expanded={open} aria-controls="response-choices" disabled={choices.length === 0} onClick={() => onOpenChange(!open)}>
-      <span>{open ? "選択肢を閉じる" : "選択肢を開く"}</span>
+    {/* Keep the return target focusable while receiving, without allowing it to open. */}
+    <button ref={toggle} type="button" className="choice-toggle" aria-expanded={expanded} aria-controls="response-choices" aria-disabled={disabled || choices.length === 0} disabled={choices.length === 0} onClick={() => { if (!disabled) onOpenChange(!expanded); }}>
+      <span>{expanded ? "選択肢を閉じる" : "選択肢を開く"}</span>
       <span className="choice-count" aria-hidden="true">{choices.length}</span>
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 10 4-4 4 4" /></svg>
     </button>
-    <div id="response-choices" className="choice-drawer" role="region" aria-label="応答の選択肢" hidden={!open}>
+    <div id="response-choices" className="choice-drawer" role="region" aria-label="応答の選択肢" hidden={!expanded}>
       <div className="choice-drawer-heading">応答を選択</div>
       <div ref={list} className="choices">
         {groups.map((group) => <section key={group} className="choice-group" aria-label={group}>

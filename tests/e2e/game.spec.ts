@@ -150,6 +150,7 @@ test("recorded information reveals marked choices and supports a complete button
 
   await expect(choices.locator(".record-choice")).toHaveCount(0);
   await choose(/聞こえる/);
+  await choose(/逃げられない/);
   choices = await openChoices(page);
   await expect(choices.getByRole("button", { name: /第2機械室へ行って/ })).toHaveCount(0);
   await choose(/非常電源はどこ/);
@@ -181,8 +182,34 @@ test("recorded information reveals marked choices and supports a complete button
   await expect(choices.getByRole("button", { name: /第2機械室へ行って/ })).toHaveClass(/record-choice/);
 });
 
+test("suggestions reveal situational actions only after the relevant conversation", async ({ page }) => {
+  await connect(page);
+  let choices = await openChoices(page);
+  for (const name of [/聞こえる/, /誰/, /何が起き/, /今どこ/]) {
+    await expect(choices.getByRole("button", { name })).toBeVisible();
+  }
+  for (const name of [/信じて/, /扉を壊せない/, /非常電源はどこ/, /水槽07って何/, /第2機械室へ/]) {
+    await expect(choices.getByRole("button", { name })).toHaveCount(0);
+  }
+
+  await choices.getByRole("button", { name: /何が起き/ }).click();
+  await readyForInput(page);
+  choices = await openChoices(page);
+  await expect(choices.getByRole("button", { name: /信じて/ })).toBeVisible();
+  await expect(choices.getByRole("button", { name: /非常電源はどこ/ })).toBeVisible();
+  await expect(choices.getByRole("button", { name: /水槽07って何/ })).toBeVisible();
+  await expect(choices.getByRole("button", { name: /扉を壊せない/ })).toHaveCount(0);
+
+  await choices.getByRole("button", { name: /今どこ/ }).click();
+  await readyForInput(page);
+  choices = await openChoices(page);
+  await expect(choices.getByRole("button", { name: /扉を壊せない/ })).toBeVisible();
+});
+
 test("the choice drawer opens all available actions and supports keyboard selection without losing a draft", async ({ page }) => {
   await connect(page);
+  await keyword(page, "聞こえる");
+  await keyword(page, "逃げられない？");
   const input = page.getByRole("combobox", { name: "キーワード", exact: true });
   const open = page.getByRole("button", { name: "選択肢を開く", exact: true });
   await expect(open).toHaveAttribute("aria-expanded", "false");
@@ -240,6 +267,62 @@ test("deadline closes an expanded choice drawer and reconnect keeps it closed", 
   await readyForInput(page);
   await expect(page.getByRole("button", { name: "選択肢を開く", exact: true })).toHaveAttribute("aria-expanded", "false");
   await expect(page.locator(".choices")).not.toBeVisible();
+});
+
+test("new code suggestions remain unavailable until YUNA finishes transmitting", async ({ page }) => {
+  await connect(page);
+  await keyword(page, "第2機械室へ");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect(page.locator(".station")).not.toHaveClass(/reduced-motion/);
+  const clockStart = Date.now();
+  await page.clock.install({ time: clockStart });
+  await page.clock.pauseAt(clockStart + 1000);
+  const choices = await openChoices(page);
+  await expect(choices.getByRole("button", { name: /7319 を入力/ })).toHaveCount(0);
+  await choices.getByRole("button", { name: /コードを探して/ }).click();
+  const toggle = page.getByRole("button", { name: "選択肢を開く", exact: true });
+  await expect(page.getByRole("region", { name: "通信操作" })).toHaveAttribute("aria-busy", "true");
+  await expect(toggle).toBeDisabled();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(choices).not.toBeVisible();
+  await expect(toggle).toBeFocused();
+  for (const key of ["Enter", "Space"]) {
+    await page.keyboard.press(key);
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(choices).not.toBeVisible();
+  }
+  await page.clock.resume();
+  await readyForInput(page);
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).toBeFocused();
+  await openChoices(page);
+  await expect(choices.getByRole("button", { name: /7319 を入力/ })).toBeVisible();
+});
+
+test("an incoming event closes an open choice drawer until transmission completes", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await connect(page);
+  const clockStart = Date.now();
+  await page.clock.install({ time: clockStart });
+  await page.clock.pauseAt(clockStart + 1000);
+  const choices = await openChoices(page);
+  await choices.getByRole("button").first().focus();
+  await page.clock.fastForward(60000);
+  const toggle = page.getByRole("button", { name: "選択肢を開く", exact: true });
+  await expect(page.getByRole("region", { name: "通信操作" })).toHaveAttribute("aria-busy", "true");
+  await expect(toggle).toBeDisabled();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(choices).not.toBeVisible();
+  await expect(toggle).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(choices).not.toBeVisible();
+  await page.clock.resume();
+  await readyForInput(page);
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).toBeFocused();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("log")).toContainText("PRESSURE DROP DETECTED");
 });
 
 test("an incorrect release order interrupts immediately with the reconnect dialog", async ({ page }) => {

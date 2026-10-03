@@ -10,6 +10,7 @@ import {
   submitKeyword,
 } from "../src/game/engine.ts";
 import type { GameState } from "../src/game/types.ts";
+import { CHOICE_CONTEXTS, CHOICE_GROUPS } from "../src/game/scenario.ts";
 
 function start(): GameState {
   return startGame(createGame());
@@ -54,8 +55,7 @@ test("the initial connection starts a full three-minute loop", () => {
   assert.equal(game.drainageDisabled, false);
   assert.equal(game.containmentReleased, false);
   assert.ok(game.messages.some((message) => message.text.includes("聞こえる")));
-  assert.ok(getChoices(game).length > 4);
-  assert.ok(getChoices(game).some((choice) => choice.id === "power_location"));
+  assert.deepEqual(getChoices(game).map((choice) => choice.id), ["hello", "name", "incident", "location"]);
 });
 
 test("previously unknown correct commands clear loop one with SECRET END", () => {
@@ -157,6 +157,7 @@ test("releasing containment before stopping drainage cannot be repaired afterwar
 });
 
 function collectTankFacts(state: GameState): GameState {
+  if (!state.sharedTopics.includes("tank07")) state = choose(state, "incident");
   state = say(state, "7319");
   state = choose(state, "tank");
   state = choose(state, "vitals");
@@ -291,6 +292,7 @@ test("large elapsed deltas still surface intermediate flooding and final signal 
 
 test("the direct escape route relocks and reveals the central isolation clue", () => {
   let game = say(start(), "7319");
+  game = choose(game, "escape");
   game = choose(game, "open_door");
   game = advanceTime(game, 20);
   assert.ok(game.knownFacts.includes("F04"));
@@ -380,6 +382,7 @@ test("discovery reveals the relevant recorded suggestions without exposing the r
   const choice = (id: string) => getChoices(game).find((item) => item.id === id);
   assert.equal(choice("go_machine"), undefined);
   game = choose(game, "hello");
+  game = choose(game, "incident");
   assert.equal(choice("go_machine"), undefined);
   assert.equal(choice("power_location")?.fromRecord, undefined);
 
@@ -413,7 +416,7 @@ test("discovery reveals the relevant recorded suggestions without exposing the r
 test("a new player can discover the route and finish using only visible buttons", () => {
   let game = start();
   const route = [
-    "hello", "power_location", "go_machine", "find_code", "enable_power",
+    "hello", "incident", "power_location", "go_machine", "find_code", "enable_power",
     "inspect_controls", "central", "pressure", "stop_pump", "request_release", "release",
   ];
   for (const action of route) {
@@ -427,7 +430,7 @@ test("a new player can discover the route and finish using only visible buttons"
 
 test("recorded suggestions return in the next loop at the physically appropriate step", () => {
   let game = choose(start(), "hello");
-  for (const action of ["power_location", "go_machine", "find_code", "enable_power", "inspect_controls", "central", "pressure"]) {
+  for (const action of ["incident", "power_location", "go_machine", "find_code", "enable_power", "inspect_controls", "central", "pressure"]) {
     game = choose(game, action);
   }
   game = nextLoop(game);
@@ -490,7 +493,7 @@ test("a correct central-terminal keyword works before its discovery suggestion e
 
 function powerByDiscovery(): GameState {
   let game = start();
-  for (const action of ["hello", "power_location", "go_machine", "find_code", "enable_power"]) game = choose(game, action);
+  for (const action of ["hello", "incident", "power_location", "go_machine", "find_code", "enable_power"]) game = choose(game, action);
   return game;
 }
 
@@ -524,6 +527,7 @@ test("retained records do not falsely become Yuna's current-loop knowledge", () 
 
 test("rediscovering a retained code restores the natural response in the new loop", () => {
   let game = nextLoop(powerByDiscovery());
+  game = choose(game, "incident");
   game = choose(game, "power_location");
   game = choose(game, "go_machine");
   game = choose(game, "find_code");
@@ -726,4 +730,160 @@ test("deterministic mixed action sequences preserve timer and message invariants
     else game = say(game, commands[seed % commands.length]);
     assertChronological(game);
   }
+});
+
+const choiceIds = (game: GameState) => getChoices(game).map((choice) => choice.id);
+
+test("every flat candidate has an explicit editable conversation-context rule", () => {
+  for (const ids of Object.values(CHOICE_GROUPS)) {
+    for (const id of ids) assert.ok(Object.hasOwn(CHOICE_CONTEXTS, id), `Missing conversation context for ${id}`);
+  }
+});
+
+test("a fresh connection only offers questions that need no prior explanation", () => {
+  const game = start();
+  assert.deepEqual(game.sharedTopics, []);
+  assert.deepEqual(choiceIds(game), ["hello", "name", "incident", "location"]);
+  for (const id of ["reassure", "break_door", "escape", "power_location", "tank_question", "other_people"]) {
+    assert.ok(!choiceIds(game).includes(id), `${id} should not precede its subject`);
+  }
+});
+
+test("the urgent welcome introduces reassurance and escape but does not invent a locked door or blackout", () => {
+  for (const action of ["hello", "name"]) {
+    const game = choose(start(), action);
+    const ids = choiceIds(game);
+    for (const id of ["reassure", "escape", "other_people"]) assert.ok(ids.includes(id));
+    for (const id of ["break_door", "power_location", "tank_question"]) assert.ok(!ids.includes(id));
+    assert.ok(game.sharedTopics.includes("deadline"));
+    assert.ok(!game.sharedTopics.includes("closed_door"));
+  }
+});
+
+test("the incident explains the blackout and tank, but F01 is not evidence of a closed door", () => {
+  const game = choose(start(), "incident");
+  assert.ok(game.knownFacts.includes("F01"));
+  for (const id of ["power_location", "tank_question", "reassure", "escape"]) assert.ok(choiceIds(game).includes(id));
+  assert.ok(!choiceIds(game).includes("break_door"));
+  assert.ok(!game.sharedTopics.includes("closed_door"));
+});
+
+test("a location answer reveals the closed door without implying an unexplained deadline", () => {
+  let game = choose(start(), "location");
+  for (const id of ["escape", "break_door", "other_people"]) assert.ok(choiceIds(game).includes(id));
+  for (const id of ["reassure", "power_location", "tank_question"]) assert.ok(!choiceIds(game).includes(id));
+  game = choose(game, "escape");
+  assert.ok(choiceIds(game).includes("power_location"));
+  assert.ok(game.sharedTopics.includes("emergency_power"));
+});
+
+test("talking about the door gives a complete exploration route without requiring the incident question", () => {
+  let game = start();
+  for (const id of ["location", "break_door", "go_machine", "find_code", "enable_power"]) game = choose(game, id);
+  assert.equal(game.powerEnabled, true);
+  assert.ok(choiceIds(game).includes("security"));
+  assert.ok(choiceIds(game).includes("inspect_controls"));
+  assert.ok(!choiceIds(game).includes("tank"), "The named tank has not been introduced");
+  game = choose(game, "security");
+  assert.ok(choiceIds(game).includes("tank"), "The recording now introduces TANK-07");
+  assert.equal(getChoices(game).find((choice) => choice.id === "next_security")?.label, "次の映像を見る");
+  assert.ok(!game.messages.some((message) => message.text.includes("5 MIN BEFORE")));
+  game = choose(game, "next_security");
+  assert.ok(game.messages.some((message) => message.text.includes("5 MIN BEFORE")));
+});
+
+test("a suspicious unexplained command supplies the context for repeated trust recovery", () => {
+  let game = start();
+  assert.ok(!choiceIds(game).includes("reassure"));
+  game = say(game, "7319");
+  assert.ok(game.sharedTopics.includes("suspicion"));
+  game = choose(game, "reassure");
+  assert.equal(game.trustYuna, 0);
+  assert.ok(choiceIds(game).includes("reassure"));
+  game = choose(game, "reassure");
+  assert.equal(game.trustYuna, 1);
+});
+
+test("current dialogue context resets, while correct recorded shortcuts remain available", () => {
+  let game = powerByDiscovery();
+  game = say(game, "隔離プロトコルを解除");
+  assert.ok(game.sharedTopics.length > 0);
+  game = nextLoop(game);
+  assert.deepEqual(game.sharedTopics, []);
+  assert.ok(choiceIds(game).includes("go_machine"));
+  for (const id of ["reassure", "break_door", "power_location", "tank_question"]) assert.ok(!choiceIds(game).includes(id));
+  game = choose(game, "go_machine");
+  game = choose(game, "enable_power");
+  assert.ok(choiceIds(game).includes("central"));
+  assert.ok(choiceIds(game).includes("stop_pump"));
+  assert.ok(choiceIds(game).includes("request_release"));
+});
+
+test("context controls suggestions only, so hidden but meaningful direct inputs still work", () => {
+  for (const [input, action] of [["信じて。時間がない", "reassure"], ["扉を壊せない？", "break_door"], ["非常電源はどこ？", "power_location"], ["水槽07って何？", "tank_question"]]) {
+    const before = start();
+    assert.ok(!choiceIds(before).includes(action));
+    const game = say(before, input);
+    assert.ok(game.completedActions.includes(action));
+    assert.ok(game.messages.length > before.messages.length);
+    assert.ok(game.remaining < before.remaining);
+  }
+  for (const input of ["次の映像を見る", "5分前"]) {
+    const before = say(start(), "7319");
+    assert.ok(!choiceIds(before).includes("next_security"));
+    const game = say(before, input);
+    assert.ok(game.completedActions.includes("next_security"));
+    assert.ok(game.knownFacts.includes("F13"));
+  }
+  assert.equal(clearByKnownCommands(start()).ending, "secret");
+});
+
+test("timer announcements introduce urgency but never fabricate the closed-door conversation", () => {
+  const game = advanceTime(start(), 120);
+  assert.ok(game.sharedTopics.includes("deadline"));
+  assert.ok(choiceIds(game).includes("reassure"));
+  assert.ok(!choiceIds(game).includes("break_door"));
+});
+
+test("a current machine location and F01 in prior records do not imply a newly reported locked door", () => {
+  const saved = startGame({ ...createGame(), knownFacts: ["F01", "F02", "F03"], loopCount: 2 });
+  assert.ok(!choiceIds(saved).includes("break_door"));
+  let game = say(saved, "7319");
+  game = choose(game, "location");
+  assert.ok(!game.sharedTopics.includes("closed_door"));
+  assert.ok(!choiceIds(game).includes("open_door"));
+  game = choose(game, "escape");
+  assert.ok(choiceIds(game).includes("open_door"));
+});
+
+test("a pressure-control capability is not evidence of a pressure abnormality", () => {
+  let game = say(start(), "7319");
+  game = say(game, "中央管理端末");
+  assert.ok(game.sharedTopics.includes("pressure"));
+  assert.ok(!game.sharedTopics.includes("pressure_abnormal"));
+  assert.ok(!choiceIds(game).includes("pressure_details"));
+  game = choose(game, "pressure");
+  assert.ok(game.sharedTopics.includes("pressure_abnormal"));
+  assert.ok(choiceIds(game).includes("pressure_details"));
+  game = choose(game, "stop_pump");
+  assert.equal(getChoices(game).find((choice) => choice.id === "pressure_details")?.label, "圧力が異常になる理由は？");
+});
+
+test("a real pressure alarm allows an informed pressure question without navigating a diagnostic menu", () => {
+  let game = say(start(), "7319");
+  assert.ok(!choiceIds(game).includes("pressure_details"));
+  game = advanceTime(game, game.remaining - 120);
+  assert.ok(game.sharedTopics.includes("pressure_abnormal"));
+  assert.ok(choiceIds(game).includes("pressure_details"));
+});
+
+test("hearing an audio log does not pretend the live tank image has already been opened", () => {
+  let game = say(start(), "7319");
+  game = say(game, "音声ログ");
+  assert.ok(game.sharedTopics.includes("tank07"));
+  assert.ok(!game.sharedTopics.includes("tank_feed"));
+  assert.ok(choiceIds(game).includes("tank"));
+  assert.ok(!choiceIds(game).includes("brighten"));
+  game = choose(game, "tank");
+  assert.ok(choiceIds(game).includes("brighten"));
 });

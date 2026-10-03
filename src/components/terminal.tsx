@@ -152,7 +152,7 @@ export function Terminal() {
             <div className="world-intro">
               <p>2089年、日本海溝の深度3,200m。<br />未知の生物を研究する海底施設「ABYSSAL-7」で、事故が起きた。</p>
               <p>地上の端末を開いたあなたに、<br className="desktop-break" />取り残された研究員・ユナから通信が届く。</p>
-              <p className="intro-stakes">回線がもつのは、<strong>3分。</strong><br />途切れても、得た情報を手がかりに、もう一度。</p>
+              <p className="intro-stakes">回線がもつのは、<strong>3分。</strong></p>
             </div>
             <section className="start-controls" aria-label="通信操作" aria-busy={connecting}>
               <button className="primary-button" disabled={!ready || connecting} onClick={connect}>
@@ -161,7 +161,6 @@ export function Terminal() {
               <p>選択肢と言葉で、ユナを導いてください。</p>
             </section>
           </div>
-          <div className="tank-symbol" aria-hidden="true"><i /><i /><i /><i /><div className="tank-water" /><div className="tank-reflection" /></div>
         </div>
       </div> : <>
         <div className="transcript-panel">
@@ -251,8 +250,6 @@ export function Terminal() {
           <dd>「選択肢を開く」で応答の一覧を表示。場所・コード・行動を直接入力しても送信できます。画像は押すと拡大できます。</dd>
           <dt>1回の通信は3分</dt>
           <dd>実時間と行動の所要時間で残り時間が減ります。一覧や記録を開いている間も進みます。ログの「+」は接続からの経過時間です。</dd>
-          <dt>知っていることは、次の通信でも</dt>
-          <dd>情報が揃うと「記録より」と付いた選択肢が現れます。正解を知っていれば、未取得でも直接入力で進めます。</dd>
         </dl>
         <div className="display-settings"><span>画面の動き</span><button className="setting-button" aria-pressed={reduced} onClick={() => setReduced(!reduced)}>演出 {reduced ? "控えめ" : "標準"}</button></div>
         <button className="danger-button" onClick={() => setPanel("reset")}>記録を消して最初から</button>

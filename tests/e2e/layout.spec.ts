@@ -28,7 +28,8 @@ test("start screen explains the setting and opens into a centered full-screen te
   await expect(intro).toContainText("2089年、日本海溝の深度3,200m。");
   await expect(intro).toContainText("研究員・ユナ");
   await expect(intro).toContainText("回線がもつのは、3分。");
-  await expect(intro).toContainText("得た情報を手がかりに、もう一度。");
+  await expect(intro).not.toContainText("得た情報を手がかりに、もう一度。");
+  await expect(intro.locator(".tank-symbol")).toHaveCount(0);
 
   const terminal = page.getByRole("region", { name: "ABYSSAL-7 非常通信端末" });
   const startBox = await terminal.boundingBox();
@@ -146,7 +147,10 @@ test("header controls retain clear accessible names and keyboard-operable dialog
   }
   await help.focus();
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("dialog", { name: "操作案内", exact: true })).toBeVisible();
+  const helpDialog = page.getByRole("dialog", { name: "操作案内", exact: true });
+  await expect(helpDialog).toBeVisible();
+  await expect(helpDialog).not.toContainText("知っていることは、次の通信でも");
+  await expect(helpDialog).not.toContainText("未取得でも直接入力で進めます");
   await expect(page.getByRole("dialog").getByRole("button", { name: "閉じる", exact: true })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(help).toBeFocused();
@@ -156,6 +160,34 @@ test("header controls retain clear accessible names and keyboard-operable dialog
   await expect(page.getByRole("dialog", { name: "記録", exact: true })).toContainText("受信した情報が、ここに残ります。");
   await page.keyboard.press("Escape");
   await expect(memory).toBeFocused();
+});
+
+test("long YOU messages wrap inside the transcript at 320px and leave input usable", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "接続を開始", exact: true }).click();
+  await readyForInput(page);
+  const input = page.getByRole("combobox", { name: "キーワード", exact: true });
+  const longMessage = "通信内容を確認しています。".repeat(3) + "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".repeat(2);
+  await input.fill(longMessage);
+  await page.getByRole("button", { name: "キーワードを送信", exact: true }).click();
+  await readyForInput(page);
+  const message = page.getByRole("log").locator(".speaker-you p").filter({ hasText: longMessage });
+  await expect(message).toHaveCount(1);
+  const dimensions = await message.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+    height: element.getBoundingClientRect().height,
+    lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight),
+  }));
+  expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
+  expect(dimensions.height).toBeGreaterThan(dimensions.lineHeight * 2);
+  await expectContainedByViewport(page);
+  await input.fill("今どこ？");
+  await page.keyboard.press("Enter");
+  await readyForInput(page);
+  await expect(page.getByRole("log")).toContainText("第4研究区画");
+  await expectContainedByViewport(page);
 });
 
 test("composing Japanese text does not send a keyword before composition ends", async ({ page }) => {

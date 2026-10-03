@@ -1,4 +1,4 @@
-import type { ActionDefinition, Fact, ScriptLine } from "./types.ts";
+import type { ActionDefinition, ChoiceContextRule, DialogueTopic, Fact, ScriptLine } from "./types.ts";
 
 export const LOOP_SECONDS = 180;
 export const TRUE_FACTS = ["F10", "F11", "F12", "F13", "F14", "F21"];
@@ -33,8 +33,8 @@ export const SCRIPT: Record<string, ScriptLine[]> = {
   machineKnown: [y("分かった。さっき話した第2機械室へ、保守通路から向かう")],
   machineUnknown: [y("え？　なんで場所を知ってるの？"), y("……分かった。第2機械室へ行く")],
   machineArrival: [y("着いた。非常電源の端末がある", "IMG_03"), y("認証コードが必要みたい", "IMG_04")],
-  powerKnown: [s("EMERGENCY POWER ONLINE"), y("さっき見つけたコードで通った。電源が戻った！")],
-  powerUnknown: [s("EMERGENCY POWER ONLINE"), y("……本当に通った"), y("あなた何者？")],
+  powerKnown: [s("EMERGENCY POWER ONLINE"), y("さっき見つけたコードで通った。電源が戻った！"), y("この端末で、施設の監視映像と記録、設備の一覧も見られるようになった")],
+  powerUnknown: [s("EMERGENCY POWER ONLINE"), y("……本当に通った"), y("あなた何者？"), y("この端末で、施設の監視映像と記録、設備の一覧も見られるようになった")],
   codeFirst: [y("7319？　非常電源のコード？"), y("どうして知ってるの？　……第2機械室で試してみる")],
   noPower: [y("電源が落ちていて操作できない。まず第2機械室の非常電源を戻して")],
   tankTrusted: [y("生物観測用の水槽。少なくとも……表向きは"), y("事故の前、誰もいないはずの場所から、私たちの声が聞こえた")],
@@ -92,13 +92,13 @@ export const ACTIONS: Record<string, ActionDefinition> = {
   brighten: { id: "brighten", label: "映像を明るくして", cost: 8, lines: [y("明るさを上げた。これは……反射？", "IMG_06", "quiet")] },
   audio: { id: "audio", label: "音声ログを確認", cost: 15, facts: ["F10", "F11"], lines: [s("TANK-07 / AUDIO ARCHIVE\n『こんにちは』『ユナ』『こんにちは』"), y("……これ。私の声", undefined, "quiet"), s("VOCAL MIMICRY CONFIRMED / LANGUAGE LEARNING IN PROGRESS")] },
   security: { id: "security", label: "監視ログを見る", cost: 15, scene: "security", facts: ["F12"], lines: [s("17 MIN BEFORE INCIDENT"), y("……私？", "IMG_07", "quiet"), p("覚えてない？"), y("行ってない", undefined, "quiet")] },
-  next_security: { id: "next_security", label: "5分前の記録を見る", cost: 12, facts: ["F13"], lines: [s("5 MIN BEFORE INCIDENT"), y("水槽07の前に、立ってる。ずっと動かない", "IMG_08", "quiet"), s("SUBJECT YUNA / NO RESPONSE\nVIDEO FEED INTERRUPTED", "quiet")] },
+  next_security: { id: "next_security", label: "次の映像を見る", cost: 12, facts: ["F13"], lines: [s("5 MIN BEFORE INCIDENT"), y("水槽07の前に、立ってる。ずっと動かない", "IMG_08", "quiet"), s("SUBJECT YUNA / NO RESPONSE\nVIDEO FEED INTERRUPTED", "quiet")] },
   question_identity: { id: "question_identity", label: "君、本当にユナ？", cost: 10, scene: "identity" },
   reassure: { id: "reassure", label: "信じて。時間がない", cost: 6, trust: 1 },
   central: { id: "central", label: "中央管理端末にアクセス", cost: 10, scene: "central", facts: ["F04"], lines: [s("CENTRAL CONTROL ONLINE\nISOLATION PROTOCOL ACTIVE"), y("機械室の端末から、中央管理に遠隔接続できた。隔離、圧力制御、通信履歴を操作できる")] },
   protocol: { id: "protocol", label: "隔離プロトコルの状態を確認", cost: 3, scene: "protocol", facts: ["F04"], lines: [s("ISOLATION PROTOCOL ACTIVE\nMAINTAIN / REINFORCE / RELEASE")] },
   pressure: { id: "pressure", label: "圧力制御を確認", cost: 8, scene: "pressure", facts: ["F05"] },
-  pressure_details: { id: "pressure_details", label: "なぜ圧力が上がる？", cost: 8, facts: ["F05"] },
+  pressure_details: { id: "pressure_details", label: "圧力が異常になる理由は？", cost: 8, facts: ["F05"] },
   stop_pump: { id: "stop_pump", label: "第7区画の排水ポンプを停止", cost: 10, scene: "central" },
   comms: { id: "comms", label: "通信回線を調べる", cost: 5, scene: "comms", lines: [s("AUX-07 / MAINTENANCE LINK\nINCIDENT BUFFER AVAILABLE")] },
   history: { id: "history", label: "通信履歴と施設の時計を照合", cost: 12, facts: ["F20"], lines: [s("FACILITY CLOCK: CONTINUOUS\nAUX-07 RECORD TIMESTAMP: REPEATING"), y("施設の時計は戻ってない。なのに、この回線だけ同じ3分間を繰り返してる……？")] },
@@ -119,6 +119,109 @@ export const CHOICE_GROUPS: Record<string, string[]> = {
   非常電源: ["power_location", "go_machine", "find_code", "enable_power", "admin"],
   調査: ["tank", "vitals", "brighten", "audio", "security", "next_security", "comms", "history", "signal"],
   施設操作: ["inspect_controls", "central", "protocol", "pressure", "pressure_details", "stop_pump", "request_release", "maintain", "reinforce", "open_door"],
+};
+
+/**
+ * Current-conversation prerequisites for every flat-list candidate. Empty rules
+ * are intentional: neutral questions need no setup; recorded instructions keep
+ * their separate CHOICE_RECORDS contract. None of these rules validate input.
+ */
+export const CHOICE_CONTEXTS: Record<string, ChoiceContextRule> = {
+  hello: {}, name: {}, incident: {}, location: {},
+  escape: { anyTopics: ["emergency", "closed_door", "power_outage", "emergency_power"] },
+  tank_question: { allTopics: ["tank07"] },
+  other_people: { anyTopics: ["facility", "emergency"] },
+  break_door: { allTopics: ["closed_door"] },
+  reassure: { anyTopics: ["emergency", "deadline", "suspicion"] },
+  question_identity: {},
+  power_location: { anyTopics: ["power_outage", "emergency_power"] },
+  go_machine: {},
+  find_code: { allTopics: ["code_required"] },
+  enable_power: {},
+  admin: { allTopics: ["code_required"] },
+  tank: { allTopics: ["tank07"] },
+  vitals: { allTopics: ["tank_feed"] },
+  brighten: { allTopics: ["tank_feed"] },
+  audio: { allTopics: ["tank_feed"] },
+  security: { allTopics: ["surveillance"] },
+  next_security: { allTopics: ["security_archive"] },
+  comms: { anyTopics: ["central_controls", "communications"] },
+  history: { allTopics: ["communications"] },
+  signal: { allTopics: ["communications"] },
+  inspect_controls: { allTopics: ["terminal"] },
+  central: {},
+  protocol: { anyTopics: ["central_controls", "isolation"] },
+  pressure: { anyTopics: ["central_controls", "pressure"] },
+  pressure_details: { allTopics: ["pressure_abnormal"] },
+  stop_pump: {},
+  request_release: {},
+  maintain: { allTopics: ["isolation"] },
+  reinforce: { allTopics: ["isolation"] },
+  open_door: { allTopics: ["closed_door"] },
+};
+
+/** Topics introduced by actual script output, not by accumulated fact IDs. */
+export const SCRIPT_TOPICS: Record<string, DialogueTopic[]> = {
+  welcome: ["emergency", "deadline", "facility"],
+  machineKnown: ["facility", "emergency_power"],
+  machineUnknown: ["facility", "emergency_power", "suspicion"],
+  machineArrival: ["terminal", "code_required", "emergency_power", "facility"],
+  powerKnown: ["terminal", "surveillance", "emergency_power"],
+  powerUnknown: ["terminal", "surveillance", "emergency_power", "suspicion"],
+  codeFirst: ["emergency_power", "suspicion"],
+  noPower: ["power_outage", "emergency_power", "facility"],
+  tankTrusted: ["tank07", "facility"],
+  tankDistrust: ["tank07", "power_outage", "emergency"],
+  releaseWarning: ["tank07", "isolation"],
+  pumpWarning: ["pressure", "pressure_abnormal"],
+  flood: ["emergency", "facility", "pressure_abnormal"],
+  floodRemote: ["emergency", "facility", "pressure_abnormal"],
+  floodTransit: ["emergency", "facility", "pressure_abnormal"],
+  minute: ["deadline"],
+  thirty: ["closed_door", "emergency_power", "deadline", "pressure_abnormal"],
+  thirtyMachine: ["closed_door", "emergency_power", "deadline", "pressure_abnormal"],
+  thirtyPowered: ["isolation", "pressure", "deadline", "pressure_abnormal"],
+  thirtyCentral: ["isolation", "pressure", "deadline", "pressure_abnormal"],
+  thirtyDrained: ["isolation", "pressure", "deadline", "pressure_abnormal"],
+  ten: ["deadline"],
+};
+
+/**
+ * Topics introduced by completed action responses. Conditional replies use
+ * their explicit variant keys, so incident/F01 never implies a closed door.
+ */
+export const ACTION_TOPICS: Record<string, DialogueTopic[]> = {
+  name: ["facility"],
+  incident: ["emergency", "power_outage", "tank07", "facility"],
+  location: ["facility"],
+  location_section4: ["closed_door"],
+  escape_unpowered: ["closed_door", "emergency_power"],
+  escape_powered: ["closed_door", "isolation"],
+  power_location: ["emergency_power", "facility"],
+  tank_question: ["tank07"],
+  other_people: ["facility"],
+  break_door: ["closed_door", "emergency_power"],
+  find_code: ["code_required", "emergency_power"],
+  admin: ["code_required"],
+  inspect_controls: ["terminal", "isolation", "closed_door"],
+  tank: ["tank07", "tank_feed", "surveillance"],
+  vitals: ["tank07"],
+  brighten: ["tank07", "tank_feed"],
+  audio: ["tank07"],
+  security: ["tank07", "surveillance", "security_archive"],
+  next_security: ["tank07", "surveillance", "security_archive"],
+  question_identity: ["suspicion"],
+  central: ["central_controls", "isolation", "pressure", "communications"],
+  protocol: ["isolation"],
+  pressure: ["pressure", "pressure_abnormal", "isolation", "tank07"],
+  pressure_details: ["pressure", "pressure_abnormal", "isolation", "tank07"],
+  stop_pump: ["pressure", "isolation"],
+  comms: ["communications"],
+  history: ["communications"],
+  signal: ["communications", "tank07"],
+  input_hint_unpowered: ["emergency_power"],
+  input_hint_powered: ["surveillance", "central_controls", "pressure"],
+  wrong_code_unpowered: ["code_required"],
 };
 
 /**
@@ -151,11 +254,11 @@ export const KEYWORDS: Record<string, string[]> = {
   inspect_controls: ["操作できる設備を調べる", "設備を調べる", "制御盤を調べる"],
   tank: ["水槽07", "tank07", "tank-07", "水槽07を確認", "水槽07を確認して"],
   vitals: ["生体反応", "生体反応は"], brighten: ["映像を明るくして", "明るくして"], audio: ["音声ログ", "音声ログを確認"],
-  security: ["監視ログ", "監視ログを見る", "17分前"], next_security: ["5分前", "5分前の記録", "次の映像"],
+  security: ["監視ログ", "監視ログを見る", "17分前"], next_security: ["5分前", "5分前の記録", "次の映像", "次の映像を見る"],
   question_identity: ["君本当にユナ", "本当にユナ", "あなたは本当にユナ", "君は本当にユナ", "事故の5分前から君は応答してない"],
   reassure: ["信じて時間がない", "信じて", "非常電源が必要になる", "落ち着いて", "説明している時間がない"],
   central: ["中央管理端末", "中央端末", "中央管理端末にアクセス"], protocol: ["隔離プロトコル", "isolation"],
-  pressure: ["圧力制御", "圧力を確認", "排水ポンプ", "第7区画"], pressure_details: ["なぜ圧力が上がる", "隔離そのものが事故原因"],
+  pressure: ["圧力制御", "圧力を確認", "排水ポンプ", "第7区画"], pressure_details: ["なぜ圧力が上がる", "圧力が異常になる理由は", "隔離そのものが事故原因"],
   stop_pump: ["第7区画の排水ポンプを停止", "第7区画排水ポンプを停止", "第7区画の排水ポンプ停止", "第7区画排水ポンプ停止", "排水ポンプを停止", "排水ポンプ停止", "ポンプを止めて", "排水ポンプを止めて", "drainageoff"],
   comms: ["通信回線", "通信回線を調べる"], history: ["通信履歴", "履歴", "時間を巻き戻している", "ループ"], signal: ["信号の発信元", "発信元"],
   maintain: ["維持", "隔離を維持"], reinforce: ["強化", "隔離を強化"],

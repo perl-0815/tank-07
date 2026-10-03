@@ -1,5 +1,16 @@
 export type Speaker = "SYSTEM" | "YUNA" | "YOU" | "UNKNOWN";
 export type Ending = "normal" | "true" | "secret";
+export type DialogueTopic =
+  | "emergency" | "deadline" | "facility" | "closed_door"
+  | "power_outage" | "emergency_power" | "terminal" | "code_required"
+  | "tank07" | "tank_feed" | "surveillance" | "security_archive"
+  | "suspicion" | "central_controls" | "isolation" | "pressure" | "pressure_abnormal"
+  | "communications";
+
+export interface ChoiceContextRule {
+  anyTopics?: DialogueTopic[];
+  allTopics?: DialogueTopic[];
+}
 
 export interface Message {
   id: string;
@@ -44,6 +55,8 @@ export interface GameState {
   truthClosed: boolean;
   /** Information Yuna and the player have actually shared in this connection. */
   sharedFacts: string[];
+  /** Conversation topics introduced during this connection, never persisted. */
+  sharedTopics: DialogueTopic[];
   completedActions: string[];
   centralAccessed: boolean;
   protocolInspected: boolean;
