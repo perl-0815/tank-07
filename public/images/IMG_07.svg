@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" role="img" aria-labelledby="title description">
+<title id="title">監視記録：17分前</title><desc id="description">事故17分前。水槽07の前に白衣姿の研究員が立っている。遠く、顔は見えない。</desc>
+<defs>
+  <linearGradient id="wall" x2="0.8" y2="1"><stop stop-color="#1c3035"/><stop offset=".55" stop-color="#0a181d"/><stop offset="1" stop-color="#040b0f"/></linearGradient>
+  <linearGradient id="floor" x2="0" y2="1"><stop stop-color="#142b2e"/><stop offset="1" stop-color="#030b10"/></linearGradient>
+  <linearGradient id="steel" x2="1" y2=".4"><stop stop-color="#112226"/><stop offset=".48" stop-color="#294047"/><stop offset=".53" stop-color="#172c32"/><stop offset="1" stop-color="#0b171d"/></linearGradient>
+  <linearGradient id="water" x2="0" y2="1"><stop stop-color="#193638"/><stop offset=".42" stop-color="#0c2227"/><stop offset="1" stop-color="#030f15"/></linearGradient>
+  <radialGradient id="glass"><stop stop-color="#0d2227"/><stop offset=".72" stop-color="#07171d"/><stop offset="1" stop-color="#020a10"/></radialGradient>
+  <radialGradient id="vignette"><stop offset=".46" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".74"/></radialGradient>
+  <radialGradient id="lamp"><stop stop-color="#ba5c4f" stop-opacity=".25"/><stop offset="1" stop-color="#a43930" stop-opacity="0"/></radialGradient>
+  <linearGradient id="lightshaft" x2=".3" y2="1"><stop stop-color="#86b6b2" stop-opacity=".08"/><stop offset="1" stop-color="#7aa5a4" stop-opacity="0"/></linearGradient>
+  <pattern id="scanlines" width="6" height="6" patternUnits="userSpaceOnUse"><path d="M0 1H6" stroke="#000" stroke-opacity=".3"/></pattern>
+  <filter id="grain"><feTurbulence type="fractalNoise" baseFrequency=".72" numOctaves="3" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter>
+  <filter id="soft"><feGaussianBlur stdDeviation="4"/></filter>
+</defs>
+<rect width="1200" height="675" fill="#060e14"/>
+<path d="M0 0H1200L1070 108H130Z" fill="#0e1b23"/>
+<path d="M0 0L130 108V531L0 675M1200 0L1070 108V531L1200 675" fill="url(#wall)"/>
+<path d="M0 675L130 531H1070L1200 675Z" fill="url(#floor)"/>
+<rect x="135" y="108" width="930" height="423" fill="url(#glass)" stroke="#20373f" stroke-width="25"/>
+<path d="M159 128H1041V510H159Z" fill="none" stroke="#45656b" stroke-opacity=".3"/>
+<path d="M387 114V522M812 114V522" stroke="#061015" stroke-width="24"/>
+<path d="M393 119V514M818 119V514" stroke="#426168" stroke-opacity=".42" stroke-width="3"/>
+<path d="M148 176H1052M148 483H1052" stroke="#4d7479" stroke-opacity=".1"/>
+<path d="M442 128L387 508H465L521 128Z" fill="url(#lightshaft)" opacity="0.3"/>
+<path d="M921 128L846 508H898L976 128Z" fill="url(#lightshaft)" opacity="0.17"/>
+<path d="M133 529H1070L1115 555H93Z" fill="#25373b"/>
+<path d="M143 535H1057" stroke="#587270" stroke-opacity=".3" stroke-width="3"/>
+<path d="M0 635L1189 637M153 554L39 675M406 554L377 675M792 554L836 675M1039 554L1176 675" stroke="#31464a" stroke-opacity=".35"/>
+<rect x="891" y="49" width="147" height="28" fill="#182a30"/>
+<text x="908" y="69" fill="#688483" font-size="16" letter-spacing="3">TANK—07</text>
+<path d="M145 84H270M895 84H1056" stroke="#9ba99c" stroke-opacity=".26" stroke-width="5"/>
+
+
+<g transform="translate(630 0)">
+<path d="M0 534L63 598L90 601L21 532Z" fill="#00090e" opacity=".85"/>
+<ellipse cx="10" cy="387" rx="12" ry="15" fill="#081115"/>
+<path d="M0 401Q9 397 20 402L32 435L27 489L-8 489L-6 439Z" fill="#7c9190" opacity=".55"/>
+<path d="M0 404L8 421L18 401M7 422V481M-2 450H4M14 450H21" fill="none" stroke="#2a464b" stroke-opacity=".7" stroke-width="2"/>
+<path d="M-2 489L-4 531M21 489L17 531" stroke="#122327" stroke-width="9"/>
+<path d="M-6 530H4M14 531H24" stroke="#050d12" stroke-width="5"/>
+<path d="M-2 409L-13 449M24 409L39 448" stroke="#526a6b" stroke-width="8"/>
+<path d="M-13 449V461M39 448V460" stroke="#0b1b22" stroke-width="5"/>
+<path d="M0 382Q10 369 23 385L23 399H0Z" fill="#061117"/>
+</g>
+<rect width="1200" height="675" fill="#a5c1bb" filter="url(#grain)" opacity=".035"/>
+<rect width="1200" height="675" fill="url(#scanlines)"/>
+<rect width="1200" height="675" fill="url(#vignette)"/>
+<g fill="none" stroke="#8ba6a3" stroke-opacity=".5" stroke-width="1">
+<path d="M26 57V27H56M1144 27H1174V57M26 618V648H56M1144 648H1174V618"/>
+<path d="M593 338H607M600 331V345" opacity=".3"/>
+</g>
+<g fill="#9bb1ae" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="16" letter-spacing="2" opacity=".8">
+<text x="47" y="58">ARCHIVE-07</text>
+<text x="1152" y="58" text-anchor="end">T − 00:17:00</text>
+<text x="47" y="626">IMG_07 / ABYSSAL-7</text>
+<text x="1152" y="626" text-anchor="end">SIGNAL 61%</text>
+</g>
+
+</svg>
