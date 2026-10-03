@@ -1,15 +1,17 @@
 export type Speaker = "SYSTEM" | "YUNA" | "YOU" | "UNKNOWN";
-export type Ending = "normal" | "true" | "secret";
+export type Ending = "normal" | "true" | "secret" | "echo";
 export type DialogueTopic =
   | "emergency" | "deadline" | "facility" | "closed_door"
   | "power_outage" | "emergency_power" | "terminal" | "code_required"
-  | "tank07" | "tank_feed" | "surveillance" | "security_archive"
+  | "tank07" | "tank_feed" | "tank_methods" | "surveillance" | "security_archive"
   | "suspicion" | "central_controls" | "isolation" | "pressure" | "pressure_abnormal"
-  | "communications";
+  | "communications" | "comms_methods";
 
 export interface ChoiceContextRule {
   anyTopics?: DialogueTopic[];
   allTopics?: DialogueTopic[];
+  /** Stable investigation knowledge can replace this connection's introduction. */
+  rememberedFacts?: string[];
 }
 
 export interface Message {
@@ -63,6 +65,8 @@ export interface GameState {
   pressureInspected: boolean;
   commsInspected: boolean;
   usedForeknowledge: boolean;
+  /** Explicit free-input handover confirmation, never retained on reconnect. */
+  echoPending: boolean;
 }
 
 export interface Fact {

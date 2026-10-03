@@ -50,6 +50,7 @@ export function Terminal() {
   const showDisconnect = lost && dismissedDisconnect !== sessionKey && !connecting;
   const choices = getChoices(game);
   const active = game.status === "playing" && !connecting;
+  const clockStopped = game.containmentReleased || game.status === "ending";
   const hasUnknown = game.messages.slice(0, count).some((message) => message.speaker === "UNKNOWN");
   const quiet = current?.effect === "quiet";
   const tier = active && !game.containmentReleased ? game.remaining <= 10 ? "critical" : game.remaining <= 30 ? "danger" : game.remaining <= 60 ? "warning" : "normal" : "normal";
@@ -140,8 +141,8 @@ export function Terminal() {
           <button className="menu-button memory-button" aria-haspopup="dialog" onClick={() => { setChoicesOpen(false); setPanel("memory"); }}><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3.5h10v13H5zM8 7h4M8 10h4M8 13h2" /></svg>記録 <span>{String(game.knownFacts.length).padStart(2, "0")}</span></button>
         </nav>
         <div className="clock-block">
-          <span className="clock-caption">{game.containmentReleased ? "通信終了" : tier === "critical" ? "通信限界" : "残り時間"}</span>
-          <span className="timer" role="timer" aria-label={`通信残り時間 ${timeLabel(game.remaining)}`}>{timeLabel(game.remaining)}</span>
+          <span className="clock-caption">{clockStopped ? "通信終了" : tier === "critical" ? "通信限界" : "残り時間"}</span>
+          <span className="timer" role="timer" aria-label={`${clockStopped ? "通信終了時の残り時間" : "通信残り時間"} ${timeLabel(game.remaining)}`}>{timeLabel(game.remaining)}</span>
         </div>
       </header>
 
@@ -176,10 +177,11 @@ export function Terminal() {
               {current && chars >= 0 && <LogEntry message={current} partial={current.text.slice(0, chars)} openImage={openImage} />}
               {current && chars < 0 && current.speaker !== "SYSTEM" && current.speaker !== "YOU" && <div className="transmitting" aria-hidden="true"><span className="transmission-dots">···</span>{current.speaker} 受信中…</div>}
               {complete && <div className="ending-report">
-                <h2>{game.ending === "true" ? "水槽07" : "ABYSSAL-7 INCIDENT"}</h2>
+                <h2>{game.ending === "true" ? "水槽07" : game.ending === "echo" ? "AUX-07 / RESPONSE ARCHIVE" : "ABYSSAL-7 INCIDENT"}</h2>
                 <div className="report-fields">
                   {game.ending === "normal" ? <><span>SURVIVORS <b>1</b></span><span>CAUSE <b>UNKNOWN</b></span></>
                   : game.ending === "true" ? <><span>CONNECTION HISTORY <b>ERROR</b></span><span>LOOP COUNT <b>UNKNOWN</b></span></>
+                  : game.ending === "echo" ? <><span>RESPONDER <b>YOU</b></span><span>REPLAY <b>QUEUED</b></span></>
                   : <><span>VISITOR <b>RECOGNIZED</b></span><span>CONNECTION <b>REPEATED</b></span></>}
                 </div>
                 <span className="ending-type">{game.ending?.toUpperCase()} END</span>

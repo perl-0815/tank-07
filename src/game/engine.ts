@@ -1,4 +1,5 @@
 import { ACTIONS, ACTION_TOPICS, CHOICE_CONTEXTS, CHOICE_GROUPS, CHOICE_RECORDS, KEYWORDS, LOOP_SECONDS, SCRIPT, SCRIPT_TOPICS, TRUE_FACTS } from "./scenario.ts";
+import { ECHO_INPUT, ECHO_SCRIPT, FREE_REPLIES } from "./free-input.ts";
 import type { Choice, DialogueTopic, GameState, ScriptLine } from "./types.ts";
 
 export type { Choice, GameState, Message, Ending } from "./types.ts";
@@ -13,7 +14,7 @@ export function createGame(): GameState {
     pressureFailureAt: null, doomed: null, hasPumpClue: false, truthClosed: false,
     sharedFacts: [], sharedTopics: [], completedActions: [], centralAccessed: false,
     protocolInspected: false, pressureInspected: false, commsInspected: false,
-    usedForeknowledge: false,
+    usedForeknowledge: false, echoPending: false,
   };
 }
 
@@ -72,7 +73,7 @@ export function reconnect(state: GameState): GameState {
 }
 
 function disconnect(state: GameState, reason: string): GameState {
-  return script({ ...state, status: "disconnected", scene: "disconnected" }, reason);
+  return script({ ...state, status: "disconnected", scene: "disconnected", echoPending: false }, reason);
 }
 
 /** Chronological, once-only events. No event is scheduled beyond the deadline. */
@@ -159,6 +160,32 @@ function requestRelease(state: GameState): GameState {
   return facts({ ...next, hasPumpClue: true }, ["F05"]);
 }
 
+/** Keep unresolved research available, then name the next physically useful step. */
+function guideAfterIdentity(state: GameState, wasConfirmingRelease: boolean): GameState {
+  let next = state;
+  if (!next.truthClosed && ["F10", "F11", "F14"].some((id) => !next.knownFacts.includes(id))) {
+    next = script(facts(next, ["F06", "F07"]), "investigateTank");
+  }
+  if (!next.powerEnabled) return script(facts(next, ["F02"]), "guidePower");
+  if (next.drainageDisabled) {
+    next = facts(next, ["F04", "F05", "F06"]);
+    return wasConfirmingRelease
+      ? script({ ...next, scene: "release_confirm" }, "guideReleaseConfirm")
+      : script(next, "guideRelease");
+  }
+  if (!next.knownFacts.includes("F04")) return script(next, "guideDirectory");
+  if (!next.centralAccessed) return script(facts(next, ["F04", "F06"]), "guideCentral");
+  return script(next, next.pressureInspected || next.sharedFacts.includes("F05") ? "guidePump" : "guidePressure");
+}
+
+function normalEnding(state: GameState): GameState {
+  const missing = ["F10", "F11"].some((id) => !state.knownFacts.includes(id)) ? "normalVoice"
+    : !state.knownFacts.includes("F14") ? "normalVitals"
+      : ["F12", "F13"].some((id) => !state.knownFacts.includes(id)) ? "normalYuna" : "normalIdentity";
+  const next = facts(state, missing === "normalVoice" ? ["F09"] : missing === "normalVitals" ? ["F15"] : []);
+  return script(script(script({ ...next, status: "ending", scene: "ending", ending: "normal" }, "normal"), missing), "normalClose");
+}
+
 function execute(state: GameState, actionId: string, input?: string): GameState {
   if (state.status !== "playing" || NAVIGATION_ONLY.has(actionId)) return state;
   const action = ACTIONS[actionId];
@@ -221,6 +248,9 @@ function execute(state: GameState, actionId: string, input?: string): GameState 
     usedForeknowledge: next.usedForeknowledge || codeWasAnticipated,
   }, actionId);
   next = facts(next, action.facts ?? []);
+  if (["comms", "history", "signal"].includes(actionId) && !state.sharedFacts.includes("F08")) {
+    next = script(facts(next, ["F08"]), "commsCapabilities");
+  }
   if (action.lines && actionId !== "find_code" && !(next.drainageDisabled && ["maintain", "reinforce"].includes(actionId))) next = append(next, action.lines);
 
   switch (actionId) {
@@ -251,7 +281,8 @@ function execute(state: GameState, actionId: string, input?: string): GameState 
       next = append({ ...next, questionedYunaIdentity: true, usedForeknowledge: next.usedForeknowledge || !seenTogether }, [
         { speaker: "YUNA", text: seenTogether ? "……私も、その記録を見た。でも、覚えていないの" : "……それ、誰から聞いたの？", effect: "quiet" },
       ]);
-      return next.trustYuna >= 1 ? script(facts(next, ["F21"]), "identityHigh") : script({ ...next, truthClosed: true }, "identityLow");
+      next = next.trustYuna >= 1 ? script(facts(next, ["F21"]), "identityHigh") : script({ ...next, truthClosed: true }, "identityLow");
+      return guideAfterIdentity(next, state.scene === "release_confirm");
     }
     case "reassure":
       return reply(next, next.powerEnabled || !next.sharedFacts.includes("F02") ? "……分かった。あなたを信じる" : "……分かった。非常電源を戻そう");
@@ -283,7 +314,7 @@ function execute(state: GameState, actionId: string, input?: string): GameState 
       next = script(facts(next, ["F22"]), "released");
       if (next.loopCount === 1) return script(facts({ ...next, status: "ending", scene: "ending", ending: "secret" }, ["F23"]), next.usedForeknowledge ? "secret" : "secretLearned");
       if (TRUE_FACTS.every((id) => next.knownFacts.includes(id))) return { ...next, scene: "unknown" };
-      return script({ ...next, status: "ending", scene: "ending", ending: "normal" }, "normal");
+      return normalEnding(next);
     }
     case "unknown_identity":
       if (state.scene !== "unknown") return reply(next, "水槽からの通信……？　まだ回線が繋がっていない");
@@ -294,6 +325,11 @@ function execute(state: GameState, actionId: string, input?: string): GameState 
 }
 
 export function performAction(state: GameState, actionId: string): GameState {
+  if (state.status === "playing" && state.echoPending) {
+    return actionId === "cancel_echo"
+      ? handleEchoConfirmation(state, ACTIONS.cancel_echo.label)
+      : freeReply(state, ACTIONS[actionId]?.label ?? actionId, ECHO_SCRIPT.retry, ECHO_INPUT.replyCost);
+  }
   return execute(state, actionId);
 }
 
@@ -301,11 +337,31 @@ export function normalizeKeyword(text: string): string {
   return text.normalize("NFKC").toLowerCase().replace(/[\s。、,，.!！?？「」『』:：]/g, "");
 }
 
+function freeReply(state: GameState, input: string, lines: ScriptLine[], cost: number): GameState {
+  const next = advanceTime(append(state, [{ speaker: "YOU", text: input }]), cost);
+  return next.status === "playing" ? append(next, lines) : next;
+}
+
+function handleEchoConfirmation(state: GameState, input: string): GameState {
+  const normalized = normalizeKeyword(input);
+  if (ECHO_INPUT.cancel.some((alias) => normalizeKeyword(alias) === normalized)) {
+    return freeReply({ ...state, echoPending: false }, input, ECHO_SCRIPT.cancelled, ECHO_INPUT.cancelCost);
+  }
+  if (normalized === normalizeKeyword(ECHO_INPUT.confirm)) {
+    const next = advanceTime(append(state, [{ speaker: "YOU", text: input }]), ECHO_INPUT.confirmCost);
+    return next.status === "playing"
+      ? append({ ...next, echoPending: false, status: "ending", scene: "ending", ending: "echo" }, ECHO_SCRIPT.ending)
+      : next;
+  }
+  return freeReply(state, input, normalized === normalizeKeyword(ECHO_INPUT.request) ? ECHO_SCRIPT.request : ECHO_SCRIPT.retry, ECHO_INPUT.replyCost);
+}
+
 export function submitKeyword(state: GameState, text: string): GameState {
   if (state.status !== "playing") return state;
   const input = text.trim().slice(0, 200);
   if (!input) return state;
   const normalized = normalizeKeyword(input);
+  if (state.echoPending) return handleEchoConfirmation(state, input);
   if (state.scene === "unknown" && !KEYWORDS.unknown_identity.some((alias) => normalizeKeyword(alias) === normalized)) {
     return append(state, [{ speaker: "YOU", text: input }, { speaker: "UNKNOWN", text: "聞いて。あなたが、知りたいことを", effect: "quiet" }]);
   }
@@ -313,6 +369,15 @@ export function submitKeyword(state: GameState, text: string): GameState {
     if (aliases.some((alias) => normalizeKeyword(alias) === normalized)) return execute(state, actionId, input);
   }
   if (state.scene === "unknown") return append(state, [{ speaker: "YOU", text: input }, { speaker: "UNKNOWN", text: "聞いて。あなたが、知りたいことを", effect: "quiet" }]);
+  if (state.doomed) return freeReply(state, input, [{ speaker: "YUNA", text: "操作が受け付けられない。隔壁が――" }], 3);
+  if (normalized === normalizeKeyword(ECHO_INPUT.request)) {
+    const next = freeReply(state, input, ECHO_SCRIPT.request, ECHO_INPUT.requestCost);
+    return next.status === "playing" ? { ...next, echoPending: true } : next;
+  }
+  if (normalized === normalizeKeyword(ECHO_INPUT.confirm)) return freeReply(state, input, ECHO_SCRIPT.unrequested, ECHO_INPUT.replyCost);
+  for (const entry of FREE_REPLIES) {
+    if (entry.aliases.some((alias) => normalizeKeyword(alias) === normalized)) return freeReply(state, input, entry.lines, entry.cost);
+  }
   let next = append(state, [{ speaker: "YOU", text: input }]);
   next = advanceTime(next, 3);
   if (next.status !== "playing") return next;
@@ -332,9 +397,14 @@ function recordSupports(state: GameState, id: string): boolean {
 }
 
 /** Scene-independent conversational setup, separate from records and execution. */
+function rememberedInvestigation(state: GameState, id: string): boolean {
+  return CHOICE_CONTEXTS[id]?.rememberedFacts?.some((fact) => state.knownFacts.includes(fact)) ?? false;
+}
+
 function contextSupports(state: GameState, id: string): boolean {
   const rule = CHOICE_CONTEXTS[id];
   if (!rule) return false;
+  if (rememberedInvestigation(state, id)) return true;
   return (!rule.allTopics || rule.allTopics.every((topic) => state.sharedTopics.includes(topic)))
     && (!rule.anyTopics || rule.anyTopics.some((topic) => state.sharedTopics.includes(topic)));
 }
@@ -347,28 +417,23 @@ function physicallyAvailable(state: GameState, id: string): boolean {
   if (id === "stop_pump") return !state.drainageDisabled;
   if (id === "break_door") return !state.powerEnabled && state.location === "section4";
   if (id === "central") return !state.centralAccessed;
-  if (["protocol", "pressure", "comms"].includes(id)) return state.centralAccessed;
+  if (["protocol", "pressure"].includes(id)) return state.centralAccessed;
+  if (id === "comms") return state.centralAccessed || rememberedInvestigation(state, id);
   if (id === "maintain" || id === "reinforce") return state.protocolInspected;
-  if (id === "history" || id === "signal") return state.commsInspected;
-  if (["vitals", "brighten", "audio"].includes(id)) return state.watchedTankLog;
+  if (id === "history" || id === "signal") return state.commsInspected || rememberedInvestigation(state, id);
+  if (id === "vitals" || id === "audio") return state.watchedTankLog || rememberedInvestigation(state, id);
+  if (id === "brighten") return state.sharedTopics.includes("tank_feed");
   if (id === "next_security") return state.watchedSecurityLog;
   return true;
 }
 
-function asChoice(id: string, group: string): Choice {
+function asChoice(id: string, group: string, state?: GameState): Choice {
   const action = ACTIONS[id];
-  return { id: action.id, label: action.label, cost: action.cost, group, ...(CHOICE_RECORDS[id] ? { fromRecord: true } : {}) };
+  const fromRecord = CHOICE_RECORDS[id] || (state && rememberedInvestigation(state, id));
+  return { id: action.id, label: action.label, cost: action.cost, group, ...(fromRecord ? { fromRecord: true } : {}) };
 }
 
-export function getChoices(state: GameState): Choice[] {
-  if (state.status !== "playing") return [];
-  if (state.scene === "unknown") return [asChoice("unknown_identity", "通信")];
-  if (state.doomed) return [asChoice("wait", "通信")];
-  if (state.scene === "release_confirm") {
-    const ids = ["release", "refuse", "alternative"];
-    if (!state.drainageDisabled) ids.push("pressure", "stop_pump");
-    return ids.map((id) => asChoice(id, "解除の確認"));
-  }
+function availableChoices(state: GameState): Choice[] {
   return Object.entries(CHOICE_GROUPS).flatMap(([group, ids]) => ids.filter((id) => {
     if (!recordSupports(state, id) || !physicallyAvailable(state, id) || !contextSupports(state, id)) return false;
     if (id === "hello" && state.completedActions.length > 0) return false;
@@ -376,5 +441,20 @@ export function getChoices(state: GameState): Choice[] {
     if (id === "inspect_controls" && state.knownFacts.includes("F04")) return false;
     if (state.completedActions.includes(id) && !["location", "pressure"].includes(id)) return false;
     return true;
-  }).map((id) => asChoice(id, group)));
+  }).map((id) => asChoice(id, group, state)));
+}
+
+export function getChoices(state: GameState): Choice[] {
+  if (state.status !== "playing") return [];
+  if (state.echoPending) return [asChoice("cancel_echo", "通信")];
+  if (state.scene === "unknown") return [asChoice("unknown_identity", "通信")];
+  if (state.doomed) return [asChoice("wait", "通信")];
+  if (state.scene === "release_confirm") {
+    const ids = ["release", "refuse", "alternative"];
+    if (!state.drainageDisabled) ids.push("pressure", "stop_pump");
+    const investigations = state.questionedYunaIdentity && !state.truthClosed
+      ? availableChoices(state).filter((choice) => choice.group === "調査") : [];
+    return [...ids.map((id) => asChoice(id, "解除の確認")), ...investigations];
+  }
+  return availableChoices(state);
 }

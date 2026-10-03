@@ -10,7 +10,8 @@ import {
   submitKeyword,
 } from "../src/game/engine.ts";
 import type { GameState } from "../src/game/types.ts";
-import { CHOICE_CONTEXTS, CHOICE_GROUPS } from "../src/game/scenario.ts";
+import { ACTIONS, CHOICE_CONTEXTS, CHOICE_GROUPS, FACTS, KEYWORDS } from "../src/game/scenario.ts";
+import { ECHO_INPUT, FREE_REPLIES } from "../src/game/free-input.ts";
 
 function start(): GameState {
   return startGame(createGame());
@@ -878,7 +879,8 @@ test("current dialogue context resets, while correct recorded shortcuts remain a
   game = nextLoop(game);
   assert.deepEqual(game.sharedTopics, []);
   assert.ok(choiceIds(game).includes("go_machine"));
-  for (const id of ["reassure", "break_door", "power_location", "tank_question"]) assert.ok(!choiceIds(game).includes(id));
+  for (const id of ["reassure", "break_door", "power_location"]) assert.ok(!choiceIds(game).includes(id));
+  assert.ok(choiceIds(game).includes("tank_question"), "The subject remains known, without inventing a current emergency");
   game = choose(game, "go_machine");
   game = choose(game, "enable_power");
   assert.ok(choiceIds(game).includes("central"));
@@ -953,4 +955,362 @@ test("hearing an audio log does not pretend the live tank image has already been
   assert.ok(!choiceIds(game).includes("brighten"));
   game = choose(game, "tank");
   assert.ok(choiceIds(game).includes("brighten"));
+});
+
+test("the tank explains its tools before suggesting them and remembers the methods across connections", () => {
+  let game = powerByDiscovery();
+  for (const id of ["audio", "vitals", "brighten"]) assert.ok(!choiceIds(game).includes(id));
+  const before = game;
+  game = choose(game, "tank");
+  assert.match(newText(before, game), /生体センサー.*事故前の録音/);
+  assert.match(newText(before, game), /明るさ/);
+  assert.ok(game.knownFacts.includes("F07"));
+  assert.ok(!game.knownFacts.includes("F10") && !game.knownFacts.includes("F14"));
+  for (const id of ["audio", "vitals", "brighten"]) assert.ok(choiceIds(game).includes(id));
+
+  game = nextLoop(game);
+  for (const id of ["audio", "vitals", "tank"]) assert.ok(!choiceIds(game).includes(id), "Unpowered equipment is still unavailable");
+  game = say(game, "7319");
+  for (const id of ["audio", "vitals", "tank"]) assert.equal(getChoices(game).find((choice) => choice.id === id)?.fromRecord, true);
+  assert.ok(!choiceIds(game).includes("brighten"), "There is no current image to brighten");
+  game = choose(game, "audio");
+  game = choose(game, "vitals");
+  assert.ok(game.knownFacts.includes("F10") && game.knownFacts.includes("F14"));
+});
+
+test("the tank's name persists separately from current danger and undiscovered research tools", () => {
+  let game = choose(start(), "incident");
+  assert.ok(game.knownFacts.includes("F06"));
+  game = nextLoop(game);
+  assert.deepEqual(game.sharedTopics, []);
+  assert.ok(choiceIds(game).includes("tank_question"));
+  for (const id of ["break_door", "escape", "power_location"]) assert.ok(!choiceIds(game).includes(id));
+  game = say(game, "7319");
+  assert.ok(choiceIds(game).includes("tank"));
+  for (const id of ["audio", "vitals", "brighten"]) assert.ok(!choiceIds(game).includes(id));
+});
+
+test("old saved facts restore only investigation methods that those facts actually demonstrate", () => {
+  for (const [fact, visible, hidden] of [
+    ["F10", "audio", "vitals"], ["F11", "audio", "vitals"],
+    ["F14", "vitals", "audio"], ["F20", "history", "signal"],
+  ]) {
+    const saved = startGame({ ...createGame(), loopCount: 2, knownFacts: [fact] });
+    const game = say(saved, "7319");
+    assert.equal(getChoices(game).find((choice) => choice.id === visible)?.fromRecord, true);
+    assert.ok(!choiceIds(game).includes(hidden));
+    assert.ok(!choiceIds(game).includes("brighten"));
+  }
+});
+
+test("communications introduces diagnostic methods before showing them and retains them after reconnect", () => {
+  let game = say(start(), "7319");
+  game = say(game, "中央管理端末");
+  for (const id of ["history", "signal"]) assert.ok(!choiceIds(game).includes(id));
+  const before = game;
+  game = choose(game, "comms");
+  assert.match(newText(before, game), /施設の時計.*発信元/);
+  assert.ok(game.knownFacts.includes("F08"));
+  assert.ok(!game.knownFacts.includes("F20"));
+  for (const id of ["history", "signal"]) assert.ok(choiceIds(game).includes(id));
+  game = say(nextLoop(game), "7319");
+  for (const id of ["comms", "history", "signal"]) assert.equal(getChoices(game).find((choice) => choice.id === id)?.fromRecord, true);
+  game = choose(game, "history");
+  game = choose(game, "signal");
+  assert.ok(game.knownFacts.includes("F20"));
+});
+
+function trustedRecordConnection(): GameState {
+  let game = say(start(), "7319");
+  game = choose(game, "security");
+  return choose(game, "next_security");
+}
+
+test("identity dialogue introduces unexamined research without awarding its results and guides unpowered rescue", () => {
+  let game = choose(start(), "hello");
+  const before = game;
+  game = say(game, "君、本当にユナ？");
+  assert.match(newText(before, game), /生体センサー.*事故前の録音/);
+  assert.match(newText(before, game), /第2機械室の非常電源/);
+  assert.ok(game.knownFacts.includes("F07") && game.knownFacts.includes("F02"));
+  for (const id of ["F10", "F11", "F14"]) assert.ok(!game.knownFacts.includes(id));
+  assert.ok(choiceIds(game).includes("go_machine"));
+  assert.ok(!choiceIds(game).includes("audio"));
+});
+
+test("identity guidance follows the actual power, directory, central-control and pump state", () => {
+  const cases: { setup: string[]; text: RegExp; next: string }[] = [
+    { setup: [], text: /設備の一覧/, next: "inspect_controls" },
+    { setup: ["inspect_controls"], text: /中央管理端末.*接続/, next: "central" },
+    { setup: ["inspect_controls", "central"], text: /圧力制御.*手順/, next: "pressure" },
+    { setup: ["inspect_controls", "central", "pressure"], text: /先に第7区画の排水ポンプを止めて/, next: "stop_pump" },
+  ];
+  for (const entry of cases) {
+    let game = trustedRecordConnection();
+    for (const id of entry.setup) game = choose(game, id);
+    const before = game;
+    game = choose(game, "question_identity");
+    assert.match(newText(before, game), entry.text);
+    game = choose(game, entry.next);
+    assert.equal(game.status, "playing");
+  }
+  let game = trustedRecordConnection();
+  game = say(game, "第7区画の排水ポンプを停止");
+  assert.ok(!game.knownFacts.includes("F04"));
+  const before = game;
+  game = choose(game, "question_identity");
+  assert.match(newText(before, game), /ポンプを止める手順は済んだ/);
+  assert.ok(choiceIds(game).includes("request_release"));
+  game = choose(game, "request_release");
+  game = choose(game, "release");
+  assert.equal(game.ending, "secret");
+});
+
+test("identity questioning during release confirmation preserves the final confirmation when drainage is off", () => {
+  let game = trustedRecordConnection();
+  game = say(game, "第7区画の排水ポンプを停止");
+  game = say(game, "隔離プロトコルを解除");
+  const before = game;
+  game = say(game, "君、本当にユナ？");
+  assert.equal(game.scene, "release_confirm");
+  assert.match(newText(before, game), /『開ける』を選んで/);
+  for (const id of ["audio", "vitals"]) assert.ok(choiceIds(game).includes(id), "Research mentioned in the reply remains selectable");
+  game = choose(game, "release");
+  assert.equal(game.ending, "secret");
+});
+
+test("unresolved research after an identity question at release confirmation can be completed using buttons", () => {
+  let game = trustedRecordConnection();
+  game = say(game, "第7区画の排水ポンプを停止");
+  game = say(game, "隔離プロトコルを解除");
+  game = say(game, "君、本当にユナ？");
+  for (const id of ["audio", "vitals", "request_release", "release"]) game = choose(game, id);
+  assert.equal(game.ending, "secret");
+  for (const id of ["F10", "F11", "F14", "F21"]) assert.ok(game.knownFacts.includes(id));
+});
+
+test("identity guidance does not repeat resolved research or recommend truth dialogue after refusal", () => {
+  let game = trustedRecordConnection();
+  game = say(game, "音声ログ");
+  game = say(game, "生体反応は？");
+  let before = game;
+  game = choose(game, "question_identity");
+  assert.doesNotMatch(newText(before, game), /生体センサーと事故前の録音/);
+  game = say(start(), "7319");
+  before = game;
+  game = say(game, "君、本当にユナ？");
+  assert.equal(game.truthClosed, true);
+  assert.doesNotMatch(newText(before, game), /生体センサーと事故前の録音/);
+  assert.match(newText(before, game), /設備の一覧/);
+  assert.ok(choiceIds(game).includes("inspect_controls"));
+  assert.ok(!choiceIds(game).includes("audio"));
+});
+
+test("NORMAL leaves an unresolved question that matches the information still missing", () => {
+  for (const [research, expected] of [
+    [[], /水槽07の事故前の録音/],
+    [["音声ログ"], /水槽07の生体センサー/],
+    [["音声ログ", "生体反応は？"], /事故前のユナを映す監視記録/],
+    [["音声ログ", "生体反応は？", "監視ログ", "5分前"], /記録に映ったユナと、この回線のユナ/],
+  ] as [string[], RegExp][]) {
+    let game = say(start(), "7319");
+    for (const input of research) game = say(game, input);
+    game = nextLoop(game);
+    const before = game;
+    game = clearByKnownCommands(game);
+    assert.equal(game.ending, "normal");
+    assert.match(newText(before, game), expected);
+    assert.match(newText(before, game), /まだ、違う答えがある/);
+    assert.equal(game.messages.at(-1)?.text, "CONNECTION TERMINATED");
+  }
+});
+
+test("a NORMAL hint records only the investigation method it actually introduces", () => {
+  let game = clearByKnownCommands(nextLoop(start()));
+  assert.ok(game.knownFacts.includes("F09"));
+  assert.ok(!game.knownFacts.includes("F07") && !game.knownFacts.includes("F15"));
+  assert.ok(!game.knownFacts.includes("F10") && !game.knownFacts.includes("F14"));
+  game = say(reconnect(game), "7319");
+  assert.equal(getChoices(game).find((choice) => choice.id === "audio")?.fromRecord, true);
+  assert.ok(!choiceIds(game).includes("vitals"));
+  game = choose(game, "audio");
+  game = clearByKnownCommands(game);
+  assert.equal(game.ending, "normal");
+  assert.ok(game.knownFacts.includes("F15"));
+  assert.ok(!game.knownFacts.includes("F14"));
+  game = say(reconnect(game), "7319");
+  assert.equal(getChoices(game).find((choice) => choice.id === "vitals")?.fromRecord, true);
+  game = choose(game, "vitals");
+  assert.ok(game.knownFacts.includes("F14"));
+});
+
+test("free-input flavor replies are bounded and never award trust, knowledge, or physical progress", () => {
+  for (const input of ["ＳＯＳ", "ありがとう", "こんにちは", "水槽０８"]) {
+    let game = start();
+    for (let repeat = 0; repeat < 3; repeat++) {
+      const before = game;
+      game = say(game, input);
+      assert.equal(game.remaining, before.remaining - 2);
+      assert.ok(game.messages.length > before.messages.length + 1);
+      assert.deepEqual(game.knownFacts, []);
+      assert.equal(game.trustYuna, 0);
+      assert.equal(game.powerEnabled, false);
+      assert.equal(game.echoPending, false);
+      assert.equal(game.ending, null);
+    }
+  }
+  const late = advanceTime(start(), 178);
+  const expired = say(late, "ありがとう");
+  assert.equal(expired.status, "disconnected");
+  assert.doesNotMatch(newText(late, expired), /今は、一緒にここから出よう/);
+});
+
+test("the two explicit free-input phrases reach ECHO with no discoveries or power", () => {
+  let game = start();
+  game = say(game, ECHO_INPUT.request);
+  assert.equal(game.echoPending, true);
+  assert.equal(game.remaining, 177);
+  assert.deepEqual(choiceIds(game), ["cancel_echo"]);
+  assert.match(game.messages.at(-1)?.text ?? "", /通信を終了.*次の再構築/);
+  game = say(game, ECHO_INPUT.confirm);
+  assert.equal(game.ending, "echo");
+  assert.equal(game.status, "ending");
+  assert.equal(game.remaining, 171);
+  assert.equal(game.echoPending, false);
+  assert.equal(game.powerEnabled, false);
+  assert.equal(game.containmentReleased, false);
+  assert.equal(game.trustYuna, 0);
+  assert.deepEqual(game.knownFacts, []);
+  assertChronological(game);
+  assert.deepEqual(advanceTime(game, 100), game);
+  assert.deepEqual(say(game, "7319"), game);
+});
+
+test("ECHO requires the same-connection request and cannot be confirmed by a button action", () => {
+  let game = say(start(), ECHO_INPUT.confirm);
+  assert.equal(game.ending, null);
+  assert.equal(game.echoPending, false);
+  assert.match(game.messages.at(-1)?.text ?? "", /要求は受信していません/);
+  game = say(game, ECHO_INPUT.request);
+  for (const action of [ECHO_INPUT.confirm, "echo", "release", "hello"]) {
+    const before = game;
+    game = performAction(game, action);
+    assert.equal(game.ending, null);
+    assert.equal(game.echoPending, true);
+    assert.ok(game.messages.length > before.messages.length);
+  }
+  game = say(game, ECHO_INPUT.confirm);
+  assert.equal(game.ending, "echo");
+});
+
+test("unrecognized and normal inputs during ECHO confirmation respond without executing unrelated actions", () => {
+  let game = say(start(), ECHO_INPUT.request);
+  for (const input of ["違う言葉", "7319", "こんにちは", ECHO_INPUT.request]) {
+    const before = game;
+    game = say(game, input);
+    assert.equal(game.echoPending, true);
+    assert.equal(game.powerEnabled, false);
+    assert.equal(game.ending, null);
+    assert.equal(game.remaining, before.remaining - 2);
+    assert.ok(game.messages.length > before.messages.length);
+    assert.equal(game.messages.at(-1)?.speaker, "SYSTEM");
+  }
+  game = choose(game, "cancel_echo");
+  assert.equal(game.echoPending, false);
+  assert.deepEqual(choiceIds(game), ["hello", "name", "incident", "location"]);
+  game = say(game, "7319");
+  assert.equal(game.powerEnabled, true);
+});
+
+test("ECHO cancellation restores an existing containment confirmation without losing physical progress", () => {
+  for (const input of ["取消", "取り消し", "キャンセル", "やめる"]) {
+    let game = say(start(), "7319");
+    game = say(game, "第7区画の排水ポンプを停止");
+    game = say(game, "隔離プロトコルを解除");
+    game = say(game, ECHO_INPUT.request);
+    game = say(game, input);
+    assert.equal(game.echoPending, false);
+    assert.equal(game.scene, "release_confirm");
+    assert.equal(game.drainageDisabled, true);
+    assert.equal(game.doomed, null);
+    game = choose(game, "release");
+    assert.equal(game.ending, "secret");
+  }
+});
+
+test("the ECHO request and confirmation must both finish before the deadline", () => {
+  let game = advanceTime(start(), 177);
+  game = say(game, ECHO_INPUT.request);
+  assert.equal(game.status, "disconnected");
+  assert.equal(game.echoPending, false);
+  for (const remaining of [6, 7]) {
+    game = say(start(), ECHO_INPUT.request);
+    game = advanceTime(game, game.remaining - remaining);
+    game = say(game, ECHO_INPUT.confirm);
+    assert.equal(game.echoPending, false);
+    assert.equal(game.status, remaining === 6 ? "disconnected" : "ending");
+    assert.equal(game.ending, remaining === 6 ? null : "echo");
+    assertChronological(game);
+  }
+});
+
+test("ECHO pending consent expires on timeout, reconnect, and fresh restored sessions", () => {
+  let game = say(start(), ECHO_INPUT.request);
+  game = advanceTime(game, 180);
+  assert.equal(game.echoPending, false);
+  game = reconnect(game);
+  assert.equal(game.echoPending, false);
+  game = say(game, ECHO_INPUT.confirm);
+  assert.equal(game.ending, null);
+  game = say(game, ECHO_INPUT.request);
+  const restored = startGame({ ...createGame(), loopCount: 3, knownFacts: [...game.knownFacts] });
+  assert.equal(restored.echoPending, false);
+  assert.equal(say(restored, ECHO_INPUT.confirm).ending, null);
+  game = say(game, ECHO_INPUT.confirm);
+  game = reconnect(game);
+  assert.equal(game.echoPending, false);
+  assert.equal(game.remaining, 180);
+  assert.equal(game.ending, null);
+});
+
+test("ECHO cannot escape a doomed connection or interrupt the final UNKNOWN conversation", () => {
+  let game = say(start(), "7319");
+  game = say(game, "第4区画の扉を開けて");
+  game = say(game, ECHO_INPUT.request);
+  assert.equal(game.echoPending, false);
+  assert.equal(game.doomed, "escape");
+  const failed = advanceTime(game, 180);
+  assert.deepEqual(say(failed, ECHO_INPUT.request), failed);
+
+  game = collectTankFacts(start());
+  game = collectIdentityFacts(nextLoop(game));
+  game = clearByKnownCommands(nextLoop(game));
+  assert.equal(game.scene, "unknown");
+  for (const input of [ECHO_INPUT.request, ECHO_INPUT.confirm, "こんにちは"]) {
+    const before = game;
+    game = say(game, input);
+    assert.equal(game.echoPending, false);
+    assert.equal(game.remaining, before.remaining);
+    assert.equal(game.messages.at(-1)?.speaker, "UNKNOWN");
+  }
+  game = choose(game, "unknown_identity");
+  assert.equal(game.ending, "true");
+});
+
+test("free-input secrets appear in diagnostic dialogue, never in action labels, keywords, or memory completion", () => {
+  const listed = [
+    ...Object.values(ACTIONS).map((action) => action.label),
+    ...Object.values(KEYWORDS).flat(),
+    ...Object.values(FACTS).flatMap((fact) => fact.keyword ? [fact.keyword] : []),
+  ];
+  for (const secret of [ECHO_INPUT.request, ECHO_INPUT.confirm, ...FREE_REPLIES.flatMap((entry) => entry.aliases)]) {
+    assert.ok(!listed.includes(secret), `${secret} must remain free input only`);
+  }
+  let game = say(start(), "7319");
+  const before = game;
+  game = say(game, "通信履歴");
+  game = choose(game, "signal");
+  assert.match(newText(before, game), /応答を引き継ぐ/);
+  assert.match(newText(before, game), /私がユナです/);
+  assert.equal(game.echoPending, false);
 });

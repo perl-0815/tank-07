@@ -19,6 +19,13 @@ async function keyword(page: Page, value: string, final = false) {
   if (!final) await readyForInput(page);
 }
 
+async function selectReply(page: Page, name: RegExp, final = false) {
+  await readyForInput(page);
+  const choices = await openChoices(page);
+  await choices.getByRole("button", { name }).click();
+  if (!final) await readyForInput(page);
+}
+
 async function clearRoute(page: Page) {
   await keyword(page, "７３１９");
   await keyword(page, "第7区画の排水ポンプを停止");
@@ -38,7 +45,93 @@ test("unknown correct commands complete SECRET, reconnect completes NORMAL", asy
   await readyForInput(page);
   await clearRoute(page);
   await expect(page.getByText("NORMAL END", { exact: true })).toBeVisible();
+  await expect(page.getByRole("log")).toContainText("水槽07の事故前の録音");
+  await expect(page.getByRole("log")).toContainText("まだ、違う答えがある");
+  await page.getByRole("button", { name: "もう一度接続する", exact: true }).click();
+  await readyForInput(page);
+  await keyword(page, "7319");
+  const choices = await openChoices(page);
+  await expect(choices.getByRole("button", { name: /音声ログを確認/ })).toHaveClass(/record-choice/);
+  await expect(choices.getByRole("button", { name: /生体反応は/ })).toHaveCount(0);
   expect(errors).toEqual([]);
+});
+
+test("the hidden handover requires explicit free-text confirmation and can end a fresh connection", async ({ page }) => {
+  await connect(page);
+  await expect(page.getByRole("button", { name: "記録 00", exact: true })).toBeVisible();
+  const choices = await openChoices(page);
+  await expect(choices.getByRole("button", { name: /応答を引き継ぐ|私がユナです/ })).toHaveCount(0);
+  await expect(page.locator('#known-keywords option[value="応答を引き継ぐ"], #known-keywords option[value="私がユナです"]')).toHaveCount(0);
+  await keyword(page, "私がユナです");
+  await expect(page.getByText("ECHO END", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("log")).toContainText("引継ぎの要求は受信していません");
+  await keyword(page, "応答を引き継ぐ");
+  await expect(page.getByText("ECHO END", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("log")).toContainText("この操作は脱出のための通信を終了");
+  await openChoices(page);
+  await expect(choices.getByRole("button")).toHaveCount(1);
+  await expect(choices.getByRole("button", { name: /引継ぎを取り消す/ })).toBeEnabled();
+  await expect(page.locator('#known-keywords option[value="応答を引き継ぐ"], #known-keywords option[value="私がユナです"]')).toHaveCount(0);
+  await keyword(page, "私がユナです", true);
+  await expect(page.getByText("ECHO END", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "AUX-07 / RESPONSE ARCHIVE", exact: true })).toBeVisible();
+  await expect(page.locator(".ending-report")).toContainText("RESPONDER YOU");
+  await expect(page.locator(".ending-report")).toContainText("REPLAY QUEUED");
+  await expect(page.locator(".clock-caption")).toHaveText("通信終了");
+  const timer = page.getByRole("timer");
+  await expect(timer).toHaveText(/^\d{2}:\d{2}$/);
+  const endingTime = await timer.textContent();
+  await expect(timer).toHaveAttribute("aria-label", /^通信終了時の残り時間 /);
+  await page.clock.install();
+  await page.clock.fastForward(181000);
+  await expect(timer).toHaveText(endingTime ?? "");
+  await expect(page.getByRole("dialog", { name: "通信が途絶えました", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "もう一度接続する", exact: true }).click();
+  await page.clock.runFor(1600);
+  await page.clock.resume();
+  await readyForInput(page);
+  await keyword(page, "私がユナです");
+  await expect(page.getByText("ECHO END", { exact: true })).toHaveCount(0);
+  await keyword(page, "7319");
+  await expect(page.getByRole("log")).toContainText("EMERGENCY POWER ONLINE");
+});
+
+test("a mistaken handover reply keeps confirmation pending and cancellation restores ordinary actions", async ({ page }) => {
+  await connect(page);
+  await keyword(page, "今どこ？");
+  await keyword(page, "応答を引き継ぐ");
+  await keyword(page, "まだ決められない");
+  await expect(page.getByRole("log")).toContainText("引継ぎは、まだ確定していません");
+  const choices = await openChoices(page);
+  await expect(choices.getByRole("button")).toHaveCount(1);
+  await expect(choices.getByRole("button", { name: /引継ぎを取り消す/ })).toBeEnabled();
+  await expect(page.getByText("ECHO END", { exact: true })).toHaveCount(0);
+  await selectReply(page, /引継ぎを取り消す/);
+  await openChoices(page);
+  await expect(choices.getByRole("button", { name: /引継ぎを取り消す/ })).toHaveCount(0);
+  await expect(choices.getByRole("button", { name: /扉を壊せない/ })).toBeVisible();
+  await keyword(page, "7319");
+  await expect(page.getByRole("log")).toContainText("EMERGENCY POWER ONLINE");
+});
+
+test("the handover confirmation does not pause the deadline or survive reconnection", async ({ page }) => {
+  await connect(page);
+  await keyword(page, "応答を引き継ぐ");
+  await openChoices(page);
+  await page.clock.install();
+  await page.clock.fastForward(181000);
+  const disconnected = page.getByRole("dialog", { name: "通信が途絶えました", exact: true });
+  await expect(disconnected).toBeVisible();
+  await expect(disconnected.getByRole("button", { name: "再接続する", exact: true })).toBeFocused();
+  await disconnected.getByRole("button", { name: "再接続する", exact: true }).click();
+  await page.clock.runFor(1600);
+  await page.clock.resume();
+  await readyForInput(page);
+  const choices = await openChoices(page);
+  await expect(choices.getByRole("button", { name: /引継ぎを取り消す/ })).toHaveCount(0);
+  await keyword(page, "7319");
+  await expect(page.getByRole("log")).toContainText("EMERGENCY POWER ONLINE");
+  await expect(page.getByText("ECHO END", { exact: true })).toHaveCount(0);
 });
 
 test("deadline preserves memory and enables reconnect; image dialog restores focus", async ({ page }) => {
@@ -371,6 +464,95 @@ test("a retired navigation keyword does not lock subsequent valid commands", asy
   await expect(page.getByRole("log")).toContainText("EMERGENCY POWER ONLINE");
 });
 
+test("spoken investigation clues and remembered buttons lead to TRUE without typing a command", async ({ page }) => {
+  await connect(page);
+  for (const name of [/聞こえる/, /何が起きた/, /非常電源はどこ/, /第2機械室へ行って/, /コードを探して/, /7319 を入力/, /水槽07を確認する/]) {
+    await selectReply(page, name);
+  }
+  await expect(page.getByRole("log")).toContainText("生体センサー");
+  await expect(page.getByRole("log")).toContainText("事故前の録音");
+  await selectReply(page, /生体反応は/);
+  await selectReply(page, /音声ログを確認/);
+
+  await page.clock.install();
+  const nextLoop = async () => {
+    await page.clock.fastForward(181000);
+    const disconnected = page.getByRole("dialog", { name: "通信が途絶えました", exact: true });
+    await expect(disconnected).toBeVisible();
+    await disconnected.getByRole("button", { name: "再接続する", exact: true }).click();
+    await page.clock.runFor(1600);
+    await page.clock.resume();
+    await readyForInput(page);
+  };
+  await nextLoop();
+  await selectReply(page, /第2機械室へ行って/);
+  await selectReply(page, /7319 を入力/);
+  let choices = await openChoices(page);
+  await expect(choices.getByRole("button", { name: /音声ログを確認/ })).toBeVisible();
+  await expect(choices.getByRole("button", { name: /生体反応は/ })).toBeVisible();
+  await selectReply(page, /監視ログを見る/);
+  await selectReply(page, /次の映像を見る/);
+  const entriesBeforeIdentity = await page.getByRole("log").locator(".log-entry").count();
+  await selectReply(page, /君、本当にユナ？/);
+  const entries = await page.getByRole("log").locator(".log-entry").allTextContents();
+  expect(entries.slice(entriesBeforeIdentity).join("\n")).toContain("設備の一覧");
+  for (const name of [/操作できる設備を調べる/, /中央管理端末にアクセス/, /圧力制御を確認/]) {
+    await selectReply(page, name);
+  }
+  await nextLoop();
+  for (const name of [/第2機械室へ行って/, /7319 を入力/, /第7区画の排水ポンプを停止/, /隔離プロトコルを解除/, /開ける/]) {
+    await selectReply(page, name);
+  }
+  choices = await openChoices(page);
+  await expect(choices.getByRole("button", { name: /君は水槽07/ })).toBeEnabled();
+  await selectReply(page, /君は水槽07/, true);
+  await expect(page.getByText("TRUE END", { exact: true })).toBeVisible();
+  await expectChronologicalLogTimes(page);
+});
+
+test("learned investigation tools survive a reload and disappear after records are erased", async ({ page }) => {
+  await connect(page);
+  await keyword(page, "7319");
+  await keyword(page, "水槽07");
+  let choices = await openChoices(page);
+  await expect(choices.getByRole("button", { name: /音声ログを確認/ })).toBeVisible();
+  await expect(choices.getByRole("button", { name: /生体反応は/ })).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: "記録から再接続", exact: true }).click();
+  await readyForInput(page);
+  await keyword(page, "7319");
+  choices = await openChoices(page);
+  await expect(choices.getByRole("button", { name: /音声ログを確認/ })).toBeVisible();
+  await expect(choices.getByRole("button", { name: /生体反応は/ })).toBeVisible();
+  await expect(choices.getByRole("button", { name: /音声ログを確認/ })).toHaveClass(/record-choice/);
+  await expect(choices.getByRole("button", { name: /生体反応は/ })).toHaveClass(/record-choice/);
+  await expect(page.getByRole("log")).not.toContainText("水槽の中、真っ暗");
+
+  await page.getByRole("button", { name: "操作案内", exact: true }).click();
+  await page.getByRole("button", { name: "記録を消して最初から", exact: true }).click();
+  await page.getByRole("button", { name: "消去して最初から", exact: true }).click();
+  await expect(page.getByRole("button", { name: "記録 00", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "接続を開始", exact: true }).click();
+  await readyForInput(page);
+  await keyword(page, "7319");
+  choices = await openChoices(page);
+  await expect(choices.getByRole("button", { name: /音声ログを確認|生体反応は/ })).toHaveCount(0);
+});
+
+test("optional free-text replies preserve normal play without granting records", async ({ page }) => {
+  await connect(page);
+  for (const value of ["SOS", "ありがとう", "こんにちは", "水槽08"]) await keyword(page, value);
+  await expect(page.getByRole("button", { name: "記録 00", exact: true })).toBeVisible();
+  await expect(page.getByRole("log")).not.toContainText("うまく聞き取れなかった");
+  await expect(page.getByRole("log")).toContainText("DISTRESS RELAY UNAVAILABLE");
+  await expect(page.getByRole("log")).toContainText("一緒にここから出よう");
+  await expect(page.getByRole("log")).toContainText("ちゃんと届いてるよ");
+  await expect(page.getByRole("log")).toContainText("観測水槽は七つまで");
+  await expect(page.getByText("ECHO END", { exact: true })).toHaveCount(0);
+  await keyword(page, "7319");
+  await expect(page.getByRole("log")).toContainText("EMERGENCY POWER ONLINE");
+});
+
 test("investigating surveillance without reassurance completes TRUE across two loops", async ({ page }) => {
   await connect(page);
   await keyword(page, "7319");
@@ -395,7 +577,9 @@ test("investigating surveillance without reassurance completes TRUE across two l
   // An otherwise recognized facility command has no meaning in the final call.
   // It must not leave the client mutation lock set for the actual last question.
   await keyword(page, "7319");
+  await keyword(page, "応答を引き継ぐ");
   const choices = await openChoices(page);
+  await expect(choices.getByRole("button", { name: /引継ぎを取り消す/ })).toHaveCount(0);
   await expect(choices.getByRole("button", { name: /君は水槽07/ })).toBeEnabled();
   await choices.getByRole("button", { name: /君は水槽07/ }).click();
   await expect(page.getByText("TRUE END", { exact: true })).toBeVisible();

@@ -10,7 +10,7 @@ export async function openChoices(page: Page) {
   await expect(page.locator(`[id="${controlledId}"]`)).toBeVisible();
   const choices = page.locator(".choices");
   await expect(choices).toBeVisible();
-  await expect(choices.getByRole("button", { name: /信じて/ })).toHaveCount(0);
+  await expect(choices.getByRole("button", { name: /信じて|応答を引き継ぐ|私がユナです/ })).toHaveCount(0);
   return choices;
 }
 
