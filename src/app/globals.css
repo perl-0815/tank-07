@@ -83,11 +83,22 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2
 .typing-cursor { display: inline-block; width: 6px; height: 13px; margin-left: 4px; background: #8abfb5; vertical-align: -1px; animation: cursor-blink 1s steps(2) infinite; }
 .transmitting { display: flex; align-items: center; gap: 9px; color: #96b6bb; font-size: 11px; min-height: 32px; }
 .transmission-dots { font-size: 19px; color: var(--teal); letter-spacing: 3px; }
-.command-deck { flex-shrink: 0; border-top: 1px solid #30454e; padding: 18px 0 calc(12px + env(safe-area-inset-bottom)); background: #0e1b23; }
-.choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 13px; }
+.command-deck { position: relative; z-index: 9; flex-shrink: 0; border-top: 1px solid #30454e; padding: 18px 0 calc(12px + env(safe-area-inset-bottom)); background: #0e1b23; }
+.choice-picker { position: relative; margin-bottom: 12px; }
+.choice-toggle { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 46px; padding: 10px 15px; border: 1px solid #5c777b; border-radius: 2px; background: #182b32; color: #d0e0dc; font-size: 12px; text-align: left; }
+.choice-toggle:hover:not(:disabled), .choice-toggle[aria-expanded="true"] { border-color: #8cb8a8; background: #213b36; }
+.choice-toggle:disabled { opacity: .45; }
+.choice-count { color: #a7bdbb; font: 10px var(--mono); }
+.choice-toggle svg { width: 16px; height: 16px; margin-left: auto; fill: none; stroke: #b6d6c9; stroke-width: 1.4; }
+.choice-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+.choice-drawer { position: absolute; bottom: calc(100% + 10px); left: 0; right: 0; display: flex; flex-direction: column; max-height: min(520px, calc(var(--viewport-height, 100dvh) - 235px)); border: 1px solid #6b8c87; border-radius: 3px; background: #10232a; box-shadow: 0 -12px 45px #02080cbf; animation: choices-open .16s ease-out; }
+.choice-drawer[hidden] { display: none; }
+.choice-drawer-heading { flex-shrink: 0; padding: 13px 16px 11px; border-bottom: 1px solid #344e54; color: #cbddd7; font-size: 12px; }
+.choices { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #52746d transparent; padding: 0 14px 16px; scroll-padding: 12px; }
 .choices:empty { display: none; }
+.choice-group h3 { margin: 17px 0 9px; color: #a7bebd; font-size: 10px; font-weight: 400; letter-spacing: .08em; }
+.choice-group-items { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .choices button { display: flex; align-items: center; gap: 12px; text-align: left; background: #122129; border: 1px solid #4c646c; padding: 11px 13px; min-height: 48px; border-radius: 2px; }
-.choice-number { color: #8cb5b0; font: 10px var(--mono); }
 .choice-label { font-size: 13px; line-height: 1.55; flex: 1; }
 .choice-cost { font: 10px var(--mono); color: #a3b2b9; flex-shrink: 0; }
 .choices button:hover:not(:disabled) { background: #203431; border-color: #83b7aa; color: #ecf8f3; box-shadow: inset 2px 0 0 #a4d4c3; }
@@ -193,6 +204,7 @@ button.attachment:hover { border-color: #8ab2af; }
 @keyframes event-glitch { 0%, 100% { transform: none; filter: none; } 15%, 55% { transform: translateX(-2px); filter: drop-shadow(1px 0 #8ac7c033) drop-shadow(-1px 0 #b4645a33); } 35%, 75% { transform: translateX(2px); } }
 @keyframes image-receive { from { clip-path: inset(0 0 100% 0); filter: brightness(.3); } to { clip-path: inset(0); filter: brightness(1); } }
 @keyframes blackout { 0%, 100% { opacity: 0; } 15%, 80% { opacity: 1; } }
+@keyframes choices-open { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes disconnection-noise {
   0%, 35% { background: repeating-linear-gradient(0deg, #65808040 0 1px, #03090cf5 1px 4px); backdrop-filter: blur(1px); }
   15%, 50% { background: repeating-linear-gradient(0deg, #03090cf5 0 3px, #9cb2af30 3px 5px); backdrop-filter: blur(5px); }
@@ -232,10 +244,11 @@ button.attachment:hover { border-color: #8ab2af; }
   .speaker-system p { font-size: 11px; }
   .log-meta { font-size: 10px; }
   .command-deck { padding: 12px 0 calc(7px + env(safe-area-inset-bottom)); }
-  .choices { gap: 7px; margin-bottom: 10px; }
+  .choice-picker { margin-bottom: 10px; }
+  .choice-group-items { grid-template-columns: 1fr; gap: 7px; }
+  .choices { padding: 0 11px 13px; }
   .choices button { gap: 8px; min-height: 48px; padding: 10px; }
   .choice-label { font-size: 12px; }
-  .choice-number { font-size: 9px; }
   .choice-cost { font-size: 8px; }
   .input-prompt { padding-left: 13px; }
   .keyword-form { min-height: 48px; }
@@ -259,9 +272,7 @@ button.attachment:hover { border-color: #8ab2af; }
   .log-content, .command-content { width: calc(100% - 32px); }
   .standby { padding-left: 22px; padding-right: 22px; }
   .intro-copy h2 { font-size: 56px; }
-  .choices button { position: relative; align-items: start; padding: 9px 24px 9px 9px; }
-  .choice-number { display: none; }
-  .choice-cost { position: absolute; top: 12px; right: 5px; font-size: 7px; }
+  .choices button { padding: 10px; }
 }
 @media (max-height: 650px) {
   .standby { padding-top: 26px; padding-bottom: 26px; }
@@ -276,8 +287,10 @@ button.attachment:hover { border-color: #8ab2af; }
 .station[data-compact="true"] .terminal-menu { margin-top: 3px; }
 .station[data-compact="true"] .menu-button { min-height: 36px; padding-block: 5px; }
 .station[data-compact="true"] .command-deck { padding-top: 8px; padding-bottom: max(4px, env(safe-area-inset-bottom)); }
-.station[data-compact="true"] .choices { gap: 5px; margin-bottom: 8px; }
-.station[data-compact="true"] .choices button { min-height: 38px; padding-top: 7px; padding-bottom: 7px; }
+.station[data-compact="true"] .choice-picker { margin-bottom: 8px; }
+.station[data-compact="true"] .choice-toggle { min-height: 40px; padding-block: 8px; }
+.station[data-compact="true"] .choice-drawer-heading { padding-block: 9px; }
+.station[data-compact="true"] .choices button { min-height: 44px; padding-top: 8px; padding-bottom: 8px; }
 .station[data-compact="true"] .record-tag { display: inline; margin-right: 5px; font-size: 8px; }
 .station[data-compact="true"] .keyword-form { min-height: 44px; }
 .station[data-compact="true"] .keyword-form input { padding-block: 9px; }

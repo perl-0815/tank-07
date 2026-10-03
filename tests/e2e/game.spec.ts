@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { expectChronologicalLogTimes, openChoices } from "./helpers";
 
 async function readyForInput(page: Page) {
   await expect(page.getByRole("region", { name: "通信操作" })).toHaveAttribute("aria-busy", "false");
@@ -132,9 +133,10 @@ for (const panel of ["image", "help", "memory"] as const) {
 
 test("recorded information reveals marked choices and supports a complete button-only rescue", async ({ page }) => {
   await connect(page);
-  const choices = page.locator(".choices");
+  let choices = await openChoices(page);
   const choose = async (name: RegExp, fromRecord = false) => {
     await readyForInput(page);
+    choices = await openChoices(page);
     const button = choices.getByRole("button", { name });
     await expect(button).toBeEnabled();
     if (fromRecord) {
@@ -143,30 +145,101 @@ test("recorded information reveals marked choices and supports a complete button
     }
     await button.click();
     await readyForInput(page);
+    await expect(page.getByRole("button", { name: "選択肢を開く", exact: true })).toHaveAttribute("aria-expanded", "false");
   };
 
   await expect(choices.locator(".record-choice")).toHaveCount(0);
   await choose(/聞こえる/);
-  await choose(/設備や周囲について聞く/);
+  choices = await openChoices(page);
   await expect(choices.getByRole("button", { name: /第2機械室へ行って/ })).toHaveCount(0);
   await choose(/非常電源はどこ/);
   await choose(/第2機械室へ行って/, true);
+  await expect(page.getByRole("log")).not.toContainText("なんで場所を知ってるの");
+  choices = await openChoices(page);
   await expect(choices.getByRole("button", { name: /7319 を入力/ })).toHaveCount(0);
   await choose(/コードを探して/);
   await choose(/7319 を入力/, true);
+  await expect(page.getByRole("log")).not.toContainText("あなた何者");
+  await expect(page.getByRole("log")).not.toContainText("本当に通った");
+  choices = await openChoices(page);
   await expect(choices.getByRole("button", { name: /中央管理端末にアクセス/ })).toHaveCount(0);
   await choose(/操作できる設備を調べる/);
   await choose(/中央管理端末にアクセス/, true);
+  choices = await openChoices(page);
   await expect(choices.getByRole("button", { name: /排水ポンプを停止/ })).toHaveCount(0);
   await expect(choices.getByRole("button", { name: /隔離プロトコルを解除/ })).toHaveCount(0);
   await choose(/圧力制御を確認/);
   await choose(/第7区画の排水ポンプを停止/, true);
   await choose(/隔離プロトコルを解除/, true);
+  choices = await openChoices(page);
   await choices.getByRole("button", { name: /開ける/ }).click();
   await expect(page.getByText("SECRET END", { exact: true })).toBeVisible();
+  await expectChronologicalLogTimes(page);
   await page.getByRole("button", { name: "もう一度接続する", exact: true }).click();
   await readyForInput(page);
+  choices = await openChoices(page);
   await expect(choices.getByRole("button", { name: /第2機械室へ行って/ })).toHaveClass(/record-choice/);
+});
+
+test("the choice drawer opens all available actions and supports keyboard selection without losing a draft", async ({ page }) => {
+  await connect(page);
+  const input = page.getByRole("combobox", { name: "キーワード", exact: true });
+  const open = page.getByRole("button", { name: "選択肢を開く", exact: true });
+  await expect(open).toHaveAttribute("aria-expanded", "false");
+  await input.fill("入力中の下書き");
+  await open.focus();
+  await page.keyboard.press("Enter");
+  const choices = await openChoices(page);
+  expect(await choices.getByRole("button").count()).toBeGreaterThan(4);
+  await expect(choices.getByRole("button", { name: /戻る|設備や周囲について聞く|施設について聞く/ })).toHaveCount(0);
+  await expect(input).toBeEditable();
+  await expect(input).toHaveValue("入力中の下書き");
+  await expect(input).toBeInViewport();
+
+  const location = choices.getByRole("button", { name: /今どこ/ });
+  await location.focus();
+  await page.keyboard.press("Escape");
+  await expect(open).toHaveAttribute("aria-expanded", "false");
+  await expect(open).toBeFocused();
+  await expect(input).toHaveValue("入力中の下書き");
+
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: "選択肢を閉じる", exact: true })).toHaveAttribute("aria-expanded", "true");
+  await location.focus();
+  await page.keyboard.press("Enter");
+  await readyForInput(page);
+  await expect(open).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("log")).toContainText("第4研究区画");
+  await expect(input).toHaveValue("入力中の下書き");
+  expect(await page.evaluate(() => {
+    const focused = document.activeElement;
+    return focused?.id === "keyword" || focused?.getAttribute("aria-controls") !== null && focused?.getAttribute("aria-expanded") === "false";
+  })).toBe(true);
+
+  await openChoices(page);
+  await input.fill("非常電源はどこ？");
+  await page.keyboard.press("Enter");
+  await readyForInput(page);
+  await expect(open).toHaveAttribute("aria-expanded", "false");
+  await expect(input).toHaveValue("");
+  await expect(page.getByRole("log")).toContainText("第2機械室");
+});
+
+test("deadline closes an expanded choice drawer and reconnect keeps it closed", async ({ page }) => {
+  await connect(page);
+  await openChoices(page);
+  await page.clock.install();
+  await page.clock.fastForward(181000);
+  const disconnected = page.getByRole("dialog", { name: "通信が途絶えました", exact: true });
+  await expect(disconnected).toBeVisible();
+  await expect(page.locator(".choices")).not.toBeVisible();
+  await expect(disconnected.getByRole("button", { name: "再接続する", exact: true })).toBeFocused();
+  await disconnected.getByRole("button", { name: "再接続する", exact: true }).click();
+  await page.clock.runFor(1600);
+  await page.clock.resume();
+  await readyForInput(page);
+  await expect(page.getByRole("button", { name: "選択肢を開く", exact: true })).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(".choices")).not.toBeVisible();
 });
 
 test("an incorrect release order interrupts immediately with the reconnect dialog", async ({ page }) => {
@@ -205,6 +278,13 @@ test("record persistence, invalid input, keyboard send and 320px layout", async 
   await expect(page.getByText("NORMAL END", { exact: true })).toBeVisible();
 });
 
+test("a retired navigation keyword does not lock subsequent valid commands", async ({ page }) => {
+  await connect(page);
+  await keyword(page, "戻る");
+  await keyword(page, "7319");
+  await expect(page.getByRole("log")).toContainText("EMERGENCY POWER ONLINE");
+});
+
 test("exploration, two loops, and last question complete TRUE", async ({ page }) => {
   await connect(page);
   await keyword(page, "7319");
@@ -224,8 +304,12 @@ test("exploration, two loops, and last question complete TRUE", async ({ page })
   await keyword(page, "第7区画の排水ポンプを停止");
   await keyword(page, "隔離プロトコルを解除");
   await keyword(page, "開ける");
-  await expect(page.getByRole("button", { name: /君は水槽07/ })).toBeEnabled();
-  await page.getByRole("button", { name: /君は水槽07/ }).click();
+  // An otherwise recognized facility command has no meaning in the final call.
+  // It must not leave the client mutation lock set for the actual last question.
+  await keyword(page, "7319");
+  const choices = await openChoices(page);
+  await expect(choices.getByRole("button", { name: /君は水槽07/ })).toBeEnabled();
+  await choices.getByRole("button", { name: /君は水槽07/ }).click();
   await expect(page.getByText("TRUE END", { exact: true })).toBeVisible();
   await expect(page.getByRole("log")).toContainText("あなたに");
   await expect(page.getByRole("button", { name: /IMG_10/ })).toBeVisible();

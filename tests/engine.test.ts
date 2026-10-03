@@ -54,7 +54,8 @@ test("the initial connection starts a full three-minute loop", () => {
   assert.equal(game.drainageDisabled, false);
   assert.equal(game.containmentReleased, false);
   assert.ok(game.messages.some((message) => message.text.includes("聞こえる")));
-  assert.equal(getChoices(game).length, 3);
+  assert.ok(getChoices(game).length > 4);
+  assert.ok(getChoices(game).some((choice) => choice.id === "power_location"));
 });
 
 test("previously unknown correct commands clear loop one with SECRET END", () => {
@@ -206,7 +207,6 @@ test("identity information can be used before it is recorded when trust is high"
 
 test("investigation and identity flags reset even after both logs were actually read", () => {
   let game = collectIdentityFacts(start());
-  game = choose(game, "back");
   game = choose(game, "tank");
   game = choose(game, "audio");
   assert.equal(game.watchedTankLog, true);
@@ -380,7 +380,6 @@ test("discovery reveals the relevant recorded suggestions without exposing the r
   const choice = (id: string) => getChoices(game).find((item) => item.id === id);
   assert.equal(choice("go_machine"), undefined);
   game = choose(game, "hello");
-  game = choose(game, "more");
   assert.equal(choice("go_machine"), undefined);
   assert.equal(choice("power_location")?.fromRecord, undefined);
 
@@ -414,11 +413,11 @@ test("discovery reveals the relevant recorded suggestions without exposing the r
 test("a new player can discover the route and finish using only visible buttons", () => {
   let game = start();
   const route = [
-    "hello", "more", "power_location", "go_machine", "find_code", "enable_power",
+    "hello", "power_location", "go_machine", "find_code", "enable_power",
     "inspect_controls", "central", "pressure", "stop_pump", "request_release", "release",
   ];
   for (const action of route) {
-    assert.ok(getChoices(game).length <= 4);
+    assert.ok(getChoices(game).every((choice) => choice.id !== "back" && choice.id !== "more"));
     game = choose(game, action);
   }
   assert.equal(game.status, "ending");
@@ -428,7 +427,7 @@ test("a new player can discover the route and finish using only visible buttons"
 
 test("recorded suggestions return in the next loop at the physically appropriate step", () => {
   let game = choose(start(), "hello");
-  for (const action of ["more", "power_location", "go_machine", "find_code", "enable_power", "inspect_controls", "central", "pressure"]) {
+  for (const action of ["power_location", "go_machine", "find_code", "enable_power", "inspect_controls", "central", "pressure"]) {
     game = choose(game, action);
   }
   game = nextLoop(game);
@@ -442,7 +441,7 @@ test("recorded suggestions return in the next loop at the physically appropriate
   game = choose(game, "enable_power");
   game = choose(game, "central");
   assert.equal(getChoices(game).find((choice) => choice.id === "stop_pump")?.fromRecord, true);
-  assert.equal(getChoices(game).some((choice) => choice.id === "request_release"), false);
+  assert.equal(getChoices(game).find((choice) => choice.id === "request_release")?.fromRecord, true);
   game = choose(game, "stop_pump");
   game = choose(game, "request_release");
   game = choose(game, "release");
@@ -469,11 +468,11 @@ test("hiding a suggestion never invalidates a correct directly entered instructi
   assert.equal(game.ending, "secret");
 });
 
-test("the direct release warning records a pump suggestion without requiring the full F05 record", () => {
+test("the direct release warning persists the explained pump procedure as F05", () => {
   let game = say(start(), "7319");
   game = say(game, "隔離プロトコルを解除");
   assert.equal(game.hasPumpClue, true);
-  assert.equal(game.knownFacts.includes("F05"), false);
+  assert.equal(game.knownFacts.includes("F05"), true);
   game = say(game, "中央管理端末");
   assert.equal(getChoices(game).find((choice) => choice.id === "stop_pump")?.fromRecord, true);
 });
@@ -484,6 +483,247 @@ test("a correct central-terminal keyword works before its discovery suggestion e
   assert.equal(getChoices(game).some((choice) => choice.id === "central"), false);
   game = say(game, "中央管理端末");
   assert.equal(game.scene, "central");
-  assert.equal(game.location, "central");
+  assert.equal(game.location, "machine");
+  assert.equal(game.centralAccessed, true);
   assert.equal(game.knownFacts.includes("F04"), true);
+});
+
+function powerByDiscovery(): GameState {
+  let game = start();
+  for (const action of ["hello", "power_location", "go_machine", "find_code", "enable_power"]) game = choose(game, action);
+  return game;
+}
+
+function newText(before: GameState, after: GameState): string {
+  return after.messages.slice(before.messages.length).map((message) => message.text).join("\n");
+}
+
+test("Yuna recognizes information she shared this loop without foreknowledge suspicion or trust loss", () => {
+  const game = powerByDiscovery();
+  assert.equal(game.trustYuna, 1);
+  assert.equal(game.usedForeknowledge, false);
+  assert.ok(game.sharedFacts.includes("F02"));
+  assert.ok(game.sharedFacts.includes("F03"));
+  const transcript = game.messages.map((message) => message.text).join("\n");
+  assert.doesNotMatch(transcript, /なんで場所を知ってる|あなた何者|どうして知ってる/);
+  assert.match(transcript, /さっき見つけたコードで通った/);
+});
+
+test("retained records do not falsely become Yuna's current-loop knowledge", () => {
+  let game = nextLoop(powerByDiscovery());
+  assert.ok(game.knownFacts.includes("F03"));
+  assert.deepEqual(game.sharedFacts, []);
+  assert.deepEqual(game.completedActions, []);
+  game = choose(game, "go_machine");
+  assert.ok(game.messages.some((message) => message.text.includes("なんで場所を知ってる")));
+  game = choose(game, "enable_power");
+  assert.equal(game.trustYuna, -1);
+  assert.equal(game.usedForeknowledge, true);
+  assert.ok(game.messages.some((message) => message.text.includes("あなた何者")));
+});
+
+test("rediscovering a retained code restores the natural response in the new loop", () => {
+  let game = nextLoop(powerByDiscovery());
+  game = choose(game, "power_location");
+  game = choose(game, "go_machine");
+  game = choose(game, "find_code");
+  const before = game;
+  game = choose(game, "enable_power");
+  assert.equal(game.trustYuna, before.trustYuna);
+  assert.doesNotMatch(newText(before, game), /何者|どうして/);
+});
+
+test("a fully discovered first-loop clear retains SECRET with a coherent Yuna response", () => {
+  let game = powerByDiscovery();
+  for (const action of ["inspect_controls", "central", "pressure", "stop_pump", "request_release", "release"]) game = choose(game, action);
+  assert.equal(game.ending, "secret");
+  assert.equal(game.usedForeknowledge, false);
+  assert.ok(game.messages.some((message) => message.text.includes("一緒に調べた手順")));
+  assert.ok(game.messages.some((message) => message.text.includes("今度は早かったね")));
+  assert.ok(!game.messages.some((message) => message.text.includes("どうして全部知ってる")));
+});
+
+test("location, escape, and incident responses match the current physical state", () => {
+  let game = say(start(), "7319");
+  let before = game;
+  game = say(game, "現在地");
+  assert.match(newText(before, game), /今は第2機械室/);
+  assert.doesNotMatch(newText(before, game), /第4研究区画。奥の扉/);
+  game = say(game, "中央管理端末");
+  assert.equal(game.location, "machine");
+  before = game;
+  game = say(game, "逃げられない？");
+  assert.match(newText(before, game), /非常電源は戻った/);
+  assert.doesNotMatch(newText(before, game), /非常電源が戻れば/);
+  before = game;
+  game = say(game, "何が起きた？");
+  assert.match(newText(before, game), /そのとき私は、第4研究区画にいた/);
+});
+
+test("repeating power, travel, and pump operations is idempotent and does not replay surprise", () => {
+  let game = say(start(), "7319");
+  const trust = game.trustYuna;
+  let before = game;
+  game = say(game, "7319");
+  assert.equal(game.trustYuna, trust);
+  assert.equal(game.remaining, before.remaining);
+  assert.doesNotMatch(newText(before, game), /何者|本当に通った/);
+  before = game;
+  game = say(game, "第2機械室へ");
+  assert.equal(game.remaining, before.remaining);
+  assert.doesNotMatch(newText(before, game), /認証コードが必要|着いた|なんで場所/);
+  game = say(game, "第7区画の排水ポンプを停止");
+  before = game;
+  game = say(game, "第7区画の排水ポンプを停止");
+  assert.equal(game.remaining, before.remaining);
+  assert.match(newText(before, game), /停止したまま/);
+  assert.doesNotMatch(newText(before, game), /そんなことしたら/);
+});
+
+test("pressure readings and shutdown dialogue reflect the already explained procedure", () => {
+  let game = powerByDiscovery();
+  game = choose(game, "inspect_controls");
+  game = choose(game, "central");
+  game = choose(game, "pressure");
+  let before = game;
+  game = choose(game, "stop_pump");
+  assert.match(newText(before, game), /確認した保守手順どおり/);
+  assert.doesNotMatch(newText(before, game), /そんなことしたら/);
+  before = game;
+  game = say(game, "圧力制御");
+  assert.match(newText(before, game), /DRAINAGE PUMP: OFFLINE/);
+  assert.doesNotMatch(newText(before, game), /DRAINAGE PUMP: ACTIVE|PRESSURE: RISING/);
+  before = game;
+  game = say(game, "なぜ圧力が上がる？");
+  assert.match(newText(before, game), /ポンプはもう止まった/);
+  assert.doesNotMatch(newText(before, game), /排水と隔離が同時に動いて/);
+});
+
+test("the identity question acknowledges surveillance watched together", () => {
+  const game = collectIdentityFacts(start());
+  assert.ok(game.messages.some((message) => message.text.includes("私も、その記録を見た")));
+  assert.ok(!game.messages.some((message) => message.text.includes("それ、誰から聞いた")));
+});
+
+test("the flat list preserves available investigations across unrelated responses", () => {
+  let game = powerByDiscovery();
+  for (const action of ["tank", "security", "inspect_controls", "central", "comms"]) game = choose(game, action);
+  game = choose(game, "location");
+  const choices = getChoices(game);
+  for (const id of ["vitals", "brighten", "audio", "next_security", "protocol", "pressure", "history", "signal"]) {
+    assert.ok(choices.some((choice) => choice.id === id), `${id} remains available without returning through a menu`);
+  }
+  assert.ok(choices.length > 4);
+  assert.ok(choices.every((choice) => typeof choice.group === "string"));
+  assert.ok(!choices.some((choice) => ["back", "more"].includes(choice.id)));
+});
+
+test("the flat list respects unfinished discovery and confirmation boundaries", () => {
+  let game = say(start(), "7319");
+  for (const id of ["vitals", "brighten", "audio", "next_security", "pressure", "history", "signal"]) {
+    assert.ok(!getChoices(game).some((choice) => choice.id === id));
+  }
+  game = say(game, "隔離プロトコルを解除");
+  assert.deepEqual(getChoices(game).map((choice) => choice.id), ["release", "refuse", "alternative", "pressure", "stop_pump"]);
+  assert.ok(getChoices(game).find((choice) => choice.id === "stop_pump")?.fromRecord);
+});
+
+test("reassurance can recover trust after an unexplained code without repeating the introduction", () => {
+  let game = say(start(), "7319");
+  const before = game;
+  game = say(game, "聞こえる");
+  assert.doesNotMatch(newText(before, game), /通信が全部死んでる|あと数分/);
+  game = choose(game, "reassure");
+  assert.equal(game.trustYuna, 0);
+  game = choose(game, "reassure");
+  assert.equal(game.trustYuna, 1);
+  game = choose(game, "security");
+  game = choose(game, "next_security");
+  game = choose(game, "question_identity");
+  assert.ok(game.knownFacts.includes("F21"));
+});
+
+test("warning knowledge survives a reload-style restoration without ephemeral flags", () => {
+  let game = say(start(), "7319");
+  game = say(game, "隔離プロトコルを解除");
+  const restored = startGame({ ...createGame(), knownFacts: [...game.knownFacts], loopCount: 2 });
+  game = say(restored, "7319");
+  assert.ok(getChoices(game).some((choice) => choice.id === "stop_pump"));
+  game = choose(game, "stop_pump");
+  assert.ok(getChoices(game).some((choice) => choice.id === "request_release"));
+});
+
+test("all nonempty user keywords produce feedback, including old navigation and recognized UNKNOWN inputs", () => {
+  for (const text of ["戻る", "操作メニュー", "unknown-command"]) {
+    const before = start();
+    const game = say(before, text);
+    assert.ok(game.messages.length > before.messages.length);
+  }
+  let game = collectTankFacts(start());
+  game = collectIdentityFacts(nextLoop(game));
+  game = clearByKnownCommands(nextLoop(game));
+  assert.equal(game.scene, "unknown");
+  for (const text of ["7319", "戻る", "聞こえる", "中央管理端末"]) {
+    const before = game;
+    game = say(game, text);
+    assert.ok(game.messages.length > before.messages.length);
+    assert.equal(game.messages.at(-1)?.speaker, "UNKNOWN");
+    assert.equal(game.remaining, before.remaining);
+  }
+  game = say(game, "君は水槽07？");
+  assert.equal(game.ending, "true");
+});
+
+function assertChronological(game: GameState): void {
+  let previous = 180;
+  const ids = new Set<string>();
+  for (const message of game.messages) {
+    assert.ok(message.remaining >= 0 && message.remaining <= previous, `${message.id}: ${message.remaining} after ${previous}`);
+    assert.ok(!ids.has(message.id));
+    ids.add(message.id);
+    previous = message.remaining;
+  }
+  assert.ok(game.remaining >= 0 && game.remaining <= previous);
+  for (const event of [game.escapeTrapAt, game.pressureFailureAt]) assert.ok(event === null || event >= 0);
+}
+
+test("action messages and every crossed timer boundary stay chronologically ordered", () => {
+  let game = advanceTime(start(), 50);
+  game = say(game, "第2機械室へ");
+  assertChronological(game);
+  const departure = game.messages.findIndex((message) => message.text.includes("第2機械室へ行く"));
+  const flood = game.messages.findIndex((message) => message.imageId === "IMG_02");
+  const arrival = game.messages.findIndex((message) => message.text.includes("着いた。非常電源"));
+  assert.ok(departure < flood && flood < arrival);
+  assert.match(game.messages[flood].text, /通路/);
+  game = say(game, "7319");
+  game = advanceTime(game, 500);
+  assertChronological(game);
+});
+
+test("failures near the deadline never create negative or backward event timestamps", () => {
+  for (const action of ["open_door", "maintain", "reinforce"]) {
+    let game = say(start(), "7319");
+    game = advanceTime(game, game.remaining - 15);
+    game = performAction(game, action);
+    assertChronological(game);
+    game = advanceTime(game, 500);
+    assertChronological(game);
+    assert.equal(game.status, "disconnected");
+    assert.equal(game.remaining, 0);
+  }
+});
+
+test("deterministic mixed action sequences preserve timer and message invariants across loops", () => {
+  let game = start();
+  let seed = 7319;
+  const commands = ["7319", "圧力制御", "現在地", "第2機械室へ", "聞こえる", "信じて", "監視ログ", "5分前", "第7区画の排水ポンプを停止", "隔離プロトコルを解除", "開ける", "待つ", "戻る"];
+  for (let step = 0; step < 600; step++) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    if (game.status === "ending" || game.status === "disconnected") game = reconnect(game);
+    if (game.scene === "unknown") game = say(game, "君は水槽07？");
+    else if (seed % 4 === 0) game = advanceTime(game, seed % 45 + 1);
+    else game = say(game, commands[seed % commands.length]);
+    assertChronological(game);
+  }
 });

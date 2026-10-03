@@ -16,6 +16,7 @@ export interface Choice {
   cost: number;
   /** A suggestion inferred from the player's recorded information. */
   fromRecord?: boolean;
+  group?: string;
 }
 
 export interface GameState {
@@ -33,7 +34,7 @@ export interface GameState {
   questionedYunaIdentity: boolean;
   messages: Message[];
   ending: Ending | null;
-  location: "section4" | "machine" | "central";
+  location: "section4" | "machine" | "central" | "passage";
   nextMessageId: number;
   triggeredEvents: string[];
   escapeTrapAt: number | null;
@@ -41,6 +42,14 @@ export interface GameState {
   doomed: "escape" | "pressure" | "order" | null;
   hasPumpClue: boolean;
   truthClosed: boolean;
+  /** Information Yuna and the player have actually shared in this connection. */
+  sharedFacts: string[];
+  completedActions: string[];
+  centralAccessed: boolean;
+  protocolInspected: boolean;
+  pressureInspected: boolean;
+  commsInspected: boolean;
+  usedForeknowledge: boolean;
 }
 
 export interface Fact {

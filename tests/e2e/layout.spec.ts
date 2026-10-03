@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openChoices } from "./helpers";
 
 async function readyForInput(page: Page) {
   await expect(page.getByRole("region", { name: "通信操作" })).toHaveAttribute("aria-busy", "false");
@@ -94,11 +95,38 @@ for (const width of [320, 390]) {
     await input.fill("中央管理端末");
     await page.keyboard.press("Enter");
     await readyForInput(page);
-    const recordedRelease = page.locator(".choices").getByRole("button", { name: /隔離プロトコルを解除/ });
+    const choices = await openChoices(page);
+    expect(await choices.getByRole("button").count()).toBeGreaterThan(4);
+    const lastChoice = choices.getByRole("button").last();
+    await lastChoice.scrollIntoViewIfNeeded();
+    await expect(lastChoice).toBeInViewport();
+    const scrolledDrawer = await choices.evaluate((element) => {
+      for (let node: HTMLElement | null = element as HTMLElement; node && node !== document.body; node = node.parentElement) {
+        if (["auto", "scroll"].includes(getComputedStyle(node).overflowY) && node.scrollHeight > node.clientHeight) {
+          return { scrollTop: node.scrollTop, scrollHeight: node.scrollHeight, clientHeight: node.clientHeight };
+        }
+      }
+      return null;
+    });
+    expect(scrolledDrawer).not.toBeNull();
+    expect(scrolledDrawer!.scrollTop).toBeGreaterThan(0);
+    expect(scrolledDrawer!.scrollHeight).toBeGreaterThan(scrolledDrawer!.clientHeight);
+    const recordedRelease = choices.getByRole("button", { name: /隔離プロトコルを解除/ });
     await expect(recordedRelease).toHaveClass(/record-choice/);
     await expect(recordedRelease).toContainText("記録より");
+    await recordedRelease.scrollIntoViewIfNeeded();
     await expect(recordedRelease).toBeInViewport();
     await expectContainedByViewport(page);
+    const drawerBox = await choices.boundingBox();
+    const inputBox = await input.boundingBox();
+    expect(drawerBox).not.toBeNull();
+    expect(inputBox).not.toBeNull();
+    expect(drawerBox!.y).toBeGreaterThanOrEqual(0);
+    expect(drawerBox!.y + drawerBox!.height).toBeLessThanOrEqual(inputBox!.y);
+    await input.fill("展開中の入力");
+    await expect(input).toHaveValue("展開中の入力");
+    await page.getByRole("button", { name: "選択肢を閉じる", exact: true }).click();
+    await expect(page.getByRole("button", { name: "選択肢を開く", exact: true })).toHaveAttribute("aria-expanded", "false");
 
     await page.setViewportSize({ width, height: width === 320 ? 640 : 844 });
     await expectContainedByViewport(page);

@@ -2,13 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { getChoices } from "@/game/engine";
-import { FACTS } from "@/game/scenario";
+import { FACTS, LOOP_SECONDS } from "@/game/scenario";
 import { IMAGES } from "@/game/images";
 import type { Message } from "@/game/types";
 import { useGame } from "@/hooks/use-game";
 import { usePlayback } from "@/hooks/use-playback";
 import { Attachment } from "./attachment";
 import { Modal } from "./dialog";
+import { ChoicePicker } from "./choice-picker";
 
 function timeLabel(seconds: number) {
   return `${Math.floor(Math.max(0, seconds) / 60).toString().padStart(2, "0")}:${Math.floor(Math.max(0, seconds) % 60).toString().padStart(2, "0")}`;
@@ -16,8 +17,9 @@ function timeLabel(seconds: number) {
 
 function LogEntry({ message, partial, openImage }: { message: Message; partial?: string; openImage: (id: string) => void }) {
   const system = message.speaker === "SYSTEM";
+  const elapsed = timeLabel(LOOP_SECONDS - message.remaining);
   return <article className={`log-entry speaker-${message.speaker.toLowerCase()} ${message.effect ?? ""}`} aria-hidden={partial !== undefined ? true : undefined}>
-    <div className="log-meta"><span className="speaker">{system ? "[ SYSTEM ]" : message.speaker}</span><span className="log-rule" /><time>{timeLabel(message.remaining)}</time></div>
+    <div className="log-meta"><span className="speaker">{system ? "[ SYSTEM ]" : message.speaker}</span><span className="log-rule" /><time title={`接続から${elapsed}経過`} aria-label={`接続から${elapsed}経過`}>+{elapsed}</time></div>
     <p>{message.speaker === "YOU" && <span className="prompt-arrow" aria-hidden="true">&gt; </span>}{partial ?? message.text}{partial !== undefined && <span className="typing-cursor" aria-hidden="true" />}</p>
     {message.imageId && partial === undefined && <Attachment id={message.imageId} onOpen={openImage} />}
   </article>;
@@ -26,6 +28,7 @@ function LogEntry({ message, partial, openImage }: { message: Message; partial?:
 export function Terminal() {
   const { game, ready, saveWarning, seen, remember, connecting, connect, act, reset, generation } = useGame();
   const [keyword, setKeyword] = useState("");
+  const [choicesOpen, setChoicesOpen] = useState(false);
   const [skipRead, setSkipRead] = useState(true);
   const [reduced, setReduced] = useState(false);
   const [panel, setPanel] = useState<"memory" | "help" | "reset" | null>(null);
@@ -86,7 +89,7 @@ export function Terminal() {
     if (lastLoop.current !== sessionKey) {
       follow.current = true;
       lastLoop.current = sessionKey;
-      queueMicrotask(() => { setAway(false); setKeyword(""); });
+      queueMicrotask(() => { setAway(false); setKeyword(""); setChoicesOpen(false); });
     }
   }, [sessionKey]);
 
@@ -110,11 +113,12 @@ export function Terminal() {
     if (busy || !active || composing.current || !value.trim()) return;
     follow.current = true;
     setAway(false);
+    setChoicesOpen(false);
     act(value, isKeyword);
     if (isKeyword) setKeyword("");
   };
 
-  const openImage = (id: string) => setImageId(id);
+  const openImage = (id: string) => { setChoicesOpen(false); setImageId(id); };
   const dismissDisconnect = () => {
     setDismissedDisconnect(sessionKey); setPanel(null); setImageId(null);
     setTimeout(() => log.current?.focus({ preventScroll: true }), 0);
@@ -132,8 +136,8 @@ export function Terminal() {
           </p>
         </div>
         <nav className="terminal-menu" aria-label="端末メニュー">
-          <button className="menu-button" aria-haspopup="dialog" onClick={() => setPanel("help")}><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" /><path d="M8 7.5a2 2 0 0 1 4 0c0 1.5-2 1.5-2 3M10 13.5v.1" /></svg>操作案内</button>
-          <button className="menu-button memory-button" aria-haspopup="dialog" onClick={() => setPanel("memory")}><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3.5h10v13H5zM8 7h4M8 10h4M8 13h2" /></svg>記録 <span>{String(game.knownFacts.length).padStart(2, "0")}</span></button>
+          <button className="menu-button" aria-haspopup="dialog" onClick={() => { setChoicesOpen(false); setPanel("help"); }}><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" /><path d="M8 7.5a2 2 0 0 1 4 0c0 1.5-2 1.5-2 3M10 13.5v.1" /></svg>操作案内</button>
+          <button className="menu-button memory-button" aria-haspopup="dialog" onClick={() => { setChoicesOpen(false); setPanel("memory"); }}><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3.5h10v13H5zM8 7h4M8 10h4M8 13h2" /></svg>記録 <span>{String(game.knownFacts.length).padStart(2, "0")}</span></button>
         </nav>
         <div className="clock-block">
           <span className="clock-caption">{game.containmentReleased ? "通信終了" : tier === "critical" ? "通信限界" : "残り時間"}</span>
@@ -198,13 +202,7 @@ export function Terminal() {
               <p>記録を持って、もう一度。</p>
               <button className="primary-button" onClick={reconnectNow} disabled={connecting}>もう一度接続する<span aria-hidden="true">↻</span></button>
             </div> : <>
-              <div className="choices" aria-label="応答の選択肢">
-                {choices.map((choice, index) => <button key={choice.id} className={choice.fromRecord ? "record-choice" : undefined} disabled={busy || !active} onClick={() => submit(choice.id)}>
-                  <span className="choice-number" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
-                  <span className="choice-label">{choice.fromRecord && <span className="record-tag">記録より</span>}{choice.label}</span>
-                  <span className="choice-cost" aria-label={`所要${choice.cost}秒`}>{choice.cost ? `−${choice.cost}s` : "↵"}</span>
-                </button>)}
-              </div>
+              <ChoicePicker choices={choices} open={choicesOpen && active} disabled={busy || !active} onOpenChange={setChoicesOpen} onSelect={(id) => submit(id)} />
               <form className="keyword-form" onSubmit={(event) => { event.preventDefault(); submit(keyword, true); }}>
                 <label htmlFor="keyword" className="sr-only">キーワード</label>
                 <span className="input-prompt" aria-hidden="true">&gt;</span>
@@ -250,9 +248,9 @@ export function Terminal() {
       <div className="manual">
         <dl>
           <dt>選ぶ、または入力する</dt>
-          <dd>選択肢を押すか、場所・コード・行動を入力して送信。画像は押すと拡大できます。</dd>
+          <dd>「選択肢を開く」で応答の一覧を表示。場所・コード・行動を直接入力しても送信できます。画像は押すと拡大できます。</dd>
           <dt>1回の通信は3分</dt>
-          <dd>実時間と行動の所要時間で残り時間が減ります。記録や映像を開いている間も進みます。</dd>
+          <dd>実時間と行動の所要時間で残り時間が減ります。一覧や記録を開いている間も進みます。ログの「+」は接続からの経過時間です。</dd>
           <dt>知っていることは、次の通信でも</dt>
           <dd>情報が揃うと「記録より」と付いた選択肢が現れます。正解を知っていれば、未取得でも直接入力で進めます。</dd>
         </dl>
