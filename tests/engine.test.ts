@@ -301,7 +301,9 @@ test("the direct escape route relocks and reveals the central isolation clue", (
 for (const decision of ["refuse", "alternative"] as const) {
   test(`declining release through ${decision} provides a pressure-failure clue`, () => {
     let game = say(start(), "7319");
+    game = choose(game, "inspect_controls");
     game = choose(game, "central");
+    game = choose(game, "pressure");
     game = choose(game, "protocol");
     game = choose(game, "request_release");
     game = choose(game, decision);
@@ -371,4 +373,117 @@ test("a completed ending remains stable until reconnect is explicitly requested"
   assert.equal(game.status, "playing");
   assert.equal(game.ending, null);
   assert.equal(game.loopCount, 2);
+});
+
+test("discovery reveals the relevant recorded suggestions without exposing the route in advance", () => {
+  let game = start();
+  const choice = (id: string) => getChoices(game).find((item) => item.id === id);
+  assert.equal(choice("go_machine"), undefined);
+  game = choose(game, "hello");
+  game = choose(game, "more");
+  assert.equal(choice("go_machine"), undefined);
+  assert.equal(choice("power_location")?.fromRecord, undefined);
+
+  game = choose(game, "power_location");
+  assert.equal(choice("go_machine")?.fromRecord, true);
+  game = choose(game, "go_machine");
+  assert.equal(choice("enable_power"), undefined);
+  assert.equal(choice("find_code")?.fromRecord, undefined);
+  game = choose(game, "find_code");
+  assert.equal(choice("enable_power")?.fromRecord, true);
+  game = choose(game, "enable_power");
+  assert.equal(choice("central"), undefined);
+  assert.equal(choice("stop_pump"), undefined);
+  assert.equal(choice("request_release"), undefined);
+
+  game = choose(game, "inspect_controls");
+  assert.equal(choice("central")?.fromRecord, true);
+  assert.equal(choice("inspect_controls"), undefined);
+  game = choose(game, "central");
+  assert.equal(choice("stop_pump"), undefined);
+  game = choose(game, "protocol");
+  assert.equal(choice("request_release"), undefined);
+  assert.ok(choice("pressure"), "The protocol screen must retain a discovery path");
+  game = choose(game, "pressure");
+  assert.equal(choice("stop_pump")?.fromRecord, true);
+  game = choose(game, "stop_pump");
+  assert.equal(choice("stop_pump"), undefined);
+  assert.equal(choice("request_release")?.fromRecord, true);
+});
+
+test("a new player can discover the route and finish using only visible buttons", () => {
+  let game = start();
+  const route = [
+    "hello", "more", "power_location", "go_machine", "find_code", "enable_power",
+    "inspect_controls", "central", "pressure", "stop_pump", "request_release", "release",
+  ];
+  for (const action of route) {
+    assert.ok(getChoices(game).length <= 4);
+    game = choose(game, action);
+  }
+  assert.equal(game.status, "ending");
+  assert.equal(game.ending, "secret");
+  assert.ok(game.remaining > 0);
+});
+
+test("recorded suggestions return in the next loop at the physically appropriate step", () => {
+  let game = choose(start(), "hello");
+  for (const action of ["more", "power_location", "go_machine", "find_code", "enable_power", "inspect_controls", "central", "pressure"]) {
+    game = choose(game, action);
+  }
+  game = nextLoop(game);
+  const atStart = getChoices(game);
+  assert.equal(atStart.find((choice) => choice.id === "go_machine")?.fromRecord, true);
+  for (const action of ["enable_power", "central", "stop_pump", "request_release"]) {
+    assert.equal(atStart.some((choice) => choice.id === action), false);
+  }
+  game = choose(game, "go_machine");
+  assert.equal(getChoices(game).find((choice) => choice.id === "enable_power")?.fromRecord, true);
+  game = choose(game, "enable_power");
+  game = choose(game, "central");
+  assert.equal(getChoices(game).find((choice) => choice.id === "stop_pump")?.fromRecord, true);
+  assert.equal(getChoices(game).some((choice) => choice.id === "request_release"), false);
+  game = choose(game, "stop_pump");
+  game = choose(game, "request_release");
+  game = choose(game, "release");
+  assert.equal(game.ending, "normal");
+});
+
+test("hiding a suggestion never invalidates a correct directly entered instruction", () => {
+  let game = start();
+  assert.equal(getChoices(game).some((choice) => choice.id === "go_machine"), false);
+  game = say(game, "第2機械室へ");
+  assert.equal(game.location, "machine");
+  assert.equal(game.knownFacts.includes("F03"), false);
+  assert.equal(getChoices(game).some((choice) => choice.id === "enable_power"), false);
+  game = say(game, "7319");
+  assert.equal(game.powerEnabled, true);
+  assert.equal(game.knownFacts.includes("F04"), false);
+  assert.equal(game.knownFacts.includes("F05"), false);
+  assert.equal(game.hasPumpClue, false);
+  game = say(game, "第7区画の排水ポンプを停止");
+  assert.equal(game.drainageDisabled, true);
+  assert.equal(getChoices(game).some((choice) => choice.id === "request_release"), false);
+  game = say(game, "隔離プロトコルを解除");
+  game = choose(game, "release");
+  assert.equal(game.ending, "secret");
+});
+
+test("the direct release warning records a pump suggestion without requiring the full F05 record", () => {
+  let game = say(start(), "7319");
+  game = say(game, "隔離プロトコルを解除");
+  assert.equal(game.hasPumpClue, true);
+  assert.equal(game.knownFacts.includes("F05"), false);
+  game = say(game, "中央管理端末");
+  assert.equal(getChoices(game).find((choice) => choice.id === "stop_pump")?.fromRecord, true);
+});
+
+test("a correct central-terminal keyword works before its discovery suggestion exists", () => {
+  let game = say(start(), "7319");
+  assert.equal(game.knownFacts.includes("F04"), false);
+  assert.equal(getChoices(game).some((choice) => choice.id === "central"), false);
+  game = say(game, "中央管理端末");
+  assert.equal(game.scene, "central");
+  assert.equal(game.location, "central");
+  assert.equal(game.knownFacts.includes("F04"), true);
 });

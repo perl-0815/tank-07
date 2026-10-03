@@ -14,6 +14,8 @@ export interface Choice {
   id: string;
   label: string;
   cost: number;
+  /** A suggestion inferred from the player's recorded information. */
+  fromRecord?: boolean;
 }
 
 export interface GameState {

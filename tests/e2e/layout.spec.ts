@@ -87,10 +87,48 @@ for (const width of [320, 390]) {
     await expect(page.getByRole("log").locator(".log-entry").last()).toBeInViewport();
     await expectContainedByViewport(page);
 
+    // Recorded suggestions add a label; they must still fit with a mobile keyboard.
+    await input.fill("圧力制御");
+    await page.keyboard.press("Enter");
+    await readyForInput(page);
+    await input.fill("中央管理端末");
+    await page.keyboard.press("Enter");
+    await readyForInput(page);
+    const recordedRelease = page.locator(".choices").getByRole("button", { name: /隔離プロトコルを解除/ });
+    await expect(recordedRelease).toHaveClass(/record-choice/);
+    await expect(recordedRelease).toContainText("記録より");
+    await expect(recordedRelease).toBeInViewport();
+    await expectContainedByViewport(page);
+
     await page.setViewportSize({ width, height: width === 320 ? 640 : 844 });
     await expectContainedByViewport(page);
   });
 }
+
+test("header controls retain clear accessible names and keyboard-operable dialogs", async ({ page }) => {
+  await page.goto("/");
+  const menu = page.getByRole("navigation", { name: "端末メニュー" });
+  const help = menu.getByRole("button", { name: "操作案内", exact: true });
+  const memory = menu.getByRole("button", { name: "記録 00", exact: true });
+  for (const button of [help, memory]) {
+    await expect(button).toHaveAttribute("aria-haspopup", "dialog");
+    const box = await button.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
+  await help.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog", { name: "操作案内", exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog").getByRole("button", { name: "閉じる", exact: true })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(help).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(memory).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog", { name: "記録", exact: true })).toContainText("受信した情報が、ここに残ります。");
+  await page.keyboard.press("Escape");
+  await expect(memory).toBeFocused();
+});
 
 test("composing Japanese text does not send a keyword before composition ends", async ({ page }) => {
   await page.goto("/");

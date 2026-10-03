@@ -77,6 +77,7 @@ export const ACTIONS: Record<string, ActionDefinition> = {
   admin: { id: "admin", label: "管理者権限を使って", cost: 12, lines: [s("ADMIN AUTHENTICATION UNAVAILABLE"), y("管理サーバーに繋がらない。保守パネルに非常電源のコードがないか探せる")] },
   back: { id: "back", label: "操作メニューに戻る", cost: 0 },
   open_door: { id: "open_door", label: "第4区画の扉を開けて", cost: 8, scene: "escaping", lines: [y("やってみる"), s("LOCK RELEASED"), y("開いた。通路に出る！")] },
+  inspect_controls: { id: "inspect_controls", label: "操作できる設備を調べる", cost: 8, scene: "powered", facts: ["F04"], lines: [s("FACILITY CONTROL DIRECTORY\nISOLATION CONTROL: CENTRAL TERMINAL"), y("中央管理端末から、隔離プロトコルを操作できる"), y("個別に扉を開けても、中央が自動で封鎖し直す仕組みみたい")] },
   tank: { id: "tank", label: "水槽07を確認する", cost: 12, scene: "tank", lines: [y("……本気？"), p("必要だ"), y("監視映像を開く。何も見えない。水槽の中、真っ暗", "IMG_05", "quiet")] },
   vitals: { id: "vitals", label: "生体反応は？", cost: 8, facts: ["F14"], lines: [y("ゼロ。そんなはずない", undefined, "quiet")] },
   brighten: { id: "brighten", label: "映像を明るくして", cost: 8, lines: [y("明るさを上げた。これは……反射？", "IMG_06", "quiet")] },
@@ -104,23 +105,39 @@ export const ACTIONS: Record<string, ActionDefinition> = {
 };
 
 export const SCENE_CHOICES: Record<string, string[]> = {
-  intro: ["hello", "name", "incident_intro"],
-  contact: ["incident", "location", "escape", "more"],
-  questions: ["power_location", "tank_question", "other_people", "go_machine"],
+  intro: ["hello", "name", "incident_intro", "go_machine"],
+  contact: ["go_machine", "incident", "location", "escape", "more"],
+  questions: ["go_machine", "power_location", "tank_question", "other_people", "back"],
   surroundings: ["break_door", "reassure", "go_machine", "back"],
-  machine: ["find_code", "enable_power", "admin", "back"],
-  powered: ["open_door", "tank", "security", "central"],
+  machine: ["enable_power", "find_code", "admin", "back"],
+  powered: ["open_door", "tank", "security", "central", "inspect_controls"],
   tank: ["vitals", "brighten", "audio", "back"],
   security: ["next_security", "question_identity", "reassure", "back"],
   identity: ["reassure", "question_identity", "central", "back"],
-  central: ["protocol", "pressure", "comms", "back"],
-  protocol: ["maintain", "reinforce", "request_release", "back"],
+  central: ["stop_pump", "request_release", "protocol", "pressure", "comms", "back"],
+  protocol: ["maintain", "reinforce", "request_release", "pressure", "back"],
   pressure: ["stop_pump", "pressure_details", "protocol", "back"],
   comms: ["history", "signal", "question_identity", "back"],
   release_confirm: ["release", "refuse", "alternative", "pressure"],
   escaping: ["wait"],
   pressure_failure: ["wait"],
   unknown: ["unknown_identity"],
+};
+
+/**
+ * Suggestions only: these records must never be consulted by execute or the
+ * keyword parser. Physical prerequisites remain separate in engine.ts.
+ * The pump warning can also supply the pump clue before a full F05 record.
+ */
+export const CHOICE_RECORDS: Record<string, string[]> = {
+  go_machine: ["F02"],
+  enable_power: ["F03"],
+  central: ["F04"],
+  protocol: ["F04"],
+  stop_pump: ["F05"],
+  request_release: ["F04", "F05"],
+  question_identity: ["F12", "F13"],
+  unknown_identity: TRUE_FACTS,
 };
 
 /** Normalize before lookup; knowledge changes suggestions, never validity. */
@@ -134,6 +151,7 @@ export const KEYWORDS: Record<string, string[]> = {
   enable_power: ["7319", "7319を入力", "コード7319", "非常電源コード7319", "非常電源コードは7319", "非常電源コードは7319です", "非常電源コード:7319"],
   admin: ["管理者権限", "管理者権限を使って"],
   open_door: ["第4区画を開ける", "第4区画の扉を開けて", "扉を開けて"],
+  inspect_controls: ["操作できる設備を調べる", "設備を調べる", "制御盤を調べる"],
   tank: ["水槽07", "tank07", "tank-07", "水槽07を確認", "水槽07を確認して"],
   vitals: ["生体反応", "生体反応は"], brighten: ["映像を明るくして", "明るくして"], audio: ["音声ログ", "音声ログを確認"],
   security: ["監視ログ", "監視ログを見る", "17分前"], next_security: ["5分前", "5分前の記録", "次の映像"],

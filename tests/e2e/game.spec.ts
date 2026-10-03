@@ -46,13 +46,21 @@ test("deadline preserves memory and enables reconnect; image dialog restores foc
   const image = page.getByRole("button", { name: "IMG_01 第4研究区画を拡大" });
   await image.click();
   await expect(page.getByRole("dialog")).toBeVisible();
-  await expect(page.getByRole("dialog").getByRole("img")).toBeVisible();
+  const expandedImage = page.getByRole("dialog").getByRole("img");
+  await expect(expandedImage).toBeVisible();
+  await expect.poll(() => expandedImage.evaluate((element) => element instanceof HTMLImageElement && element.complete && element.naturalWidth > 0)).toBe(true);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(image).toBeFocused();
   await page.clock.install();
   await page.clock.fastForward(181000);
-  await expect(page.getByRole("button", { name: "再接続する", exact: true })).toBeVisible();
+  const disconnected = page.getByRole("dialog", { name: "通信が途絶えました", exact: true });
+  await expect(disconnected).toBeVisible();
+  await expect(disconnected.getByRole("button", { name: "再接続する", exact: true })).toBeFocused();
+  await disconnected.getByRole("button", { name: "通信ログを見返す", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.clock.runFor(50);
+  await expect(page.getByRole("log")).toBeFocused();
   await page.getByRole("button", { name: "記録", exact: false }).click();
   await expect(page.getByRole("dialog").getByRole("heading", { name: "第4研究区画" })).toBeVisible();
   await page.keyboard.press("Escape");
@@ -60,6 +68,120 @@ test("deadline preserves memory and enables reconnect; image dialog restores foc
   await page.clock.runFor(1400);
   await expect(page.getByRole("timer")).toContainText("03:00");
   await expect(page.getByRole("log")).toContainText("聞こえる？");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.clock.fastForward(181000);
+  await expect(disconnected).toBeVisible();
+  await expect(disconnected.getByRole("button", { name: "再接続する", exact: true })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.clock.runFor(50);
+  await expect(page.getByRole("log")).toBeFocused();
+  await expect(page.getByRole("button", { name: "再接続する", exact: true })).toBeVisible();
+});
+
+for (const motion of ["reduced", "standard", "manual-reduced"] as const) {
+  test(`disconnect backdrop honors ${motion} motion preference`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: motion === "reduced" ? "reduce" : "no-preference" });
+    await connect(page);
+    if (motion === "manual-reduced") {
+      await page.getByRole("button", { name: "操作案内", exact: true }).click();
+      await page.getByRole("button", { name: "演出 標準", exact: true }).click();
+      await expect(page.getByRole("button", { name: "演出 控えめ", exact: true })).toBeVisible();
+      await page.keyboard.press("Escape");
+    }
+    await page.clock.install();
+    await page.clock.fastForward(181000);
+    const disconnected = page.getByRole("dialog", { name: "通信が途絶えました", exact: true });
+    await expect(disconnected).toBeVisible();
+    await expect(disconnected.getByRole("button", { name: "再接続する", exact: true })).toBeFocused();
+    expect(await disconnected.evaluate((element) => getComputedStyle(element, "::backdrop").animationName))
+      .toBe(motion === "standard" ? "disconnection-noise" : "none");
+  });
+}
+
+for (const panel of ["image", "help", "memory"] as const) {
+  test(`deadline replaces the ${panel} dialog and reconnect clears the old panel`, async ({ page }) => {
+    await connect(page);
+    await keyword(page, "今どこ？");
+    if (panel === "image") {
+      await page.getByRole("button", { name: "IMG_01 第4研究区画を拡大", exact: true }).click();
+    } else {
+      await page.getByRole("button", { name: panel === "help" ? "操作案内" : "記録 01", exact: true }).click();
+    }
+    await expect(page.getByRole("dialog")).toHaveCount(1);
+    await page.clock.install();
+    await page.clock.fastForward(181000);
+    const disconnected = page.getByRole("dialog", { name: "通信が途絶えました", exact: true });
+    await expect(disconnected).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(1);
+    const reconnect = disconnected.getByRole("button", { name: "再接続する", exact: true });
+    await expect(reconnect).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(disconnected.getByRole("button", { name: "通信ログを見返す", exact: true })).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(reconnect).toBeFocused();
+    await page.keyboard.press("Enter");
+    await page.clock.runFor(1600);
+    await page.clock.resume();
+    await readyForInput(page);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.getByRole("log")).toContainText("聞こえる？");
+    await expect(page.getByRole("button", { name: "記録 02", exact: true })).toBeVisible();
+  });
+}
+
+test("recorded information reveals marked choices and supports a complete button-only rescue", async ({ page }) => {
+  await connect(page);
+  const choices = page.locator(".choices");
+  const choose = async (name: RegExp, fromRecord = false) => {
+    await readyForInput(page);
+    const button = choices.getByRole("button", { name });
+    await expect(button).toBeEnabled();
+    if (fromRecord) {
+      await expect(button).toHaveClass(/record-choice/);
+      await expect(button).toContainText("記録より");
+    }
+    await button.click();
+    await readyForInput(page);
+  };
+
+  await expect(choices.locator(".record-choice")).toHaveCount(0);
+  await choose(/聞こえる/);
+  await choose(/設備や周囲について聞く/);
+  await expect(choices.getByRole("button", { name: /第2機械室へ行って/ })).toHaveCount(0);
+  await choose(/非常電源はどこ/);
+  await choose(/第2機械室へ行って/, true);
+  await expect(choices.getByRole("button", { name: /7319 を入力/ })).toHaveCount(0);
+  await choose(/コードを探して/);
+  await choose(/7319 を入力/, true);
+  await expect(choices.getByRole("button", { name: /中央管理端末にアクセス/ })).toHaveCount(0);
+  await choose(/操作できる設備を調べる/);
+  await choose(/中央管理端末にアクセス/, true);
+  await expect(choices.getByRole("button", { name: /排水ポンプを停止/ })).toHaveCount(0);
+  await expect(choices.getByRole("button", { name: /隔離プロトコルを解除/ })).toHaveCount(0);
+  await choose(/圧力制御を確認/);
+  await choose(/第7区画の排水ポンプを停止/, true);
+  await choose(/隔離プロトコルを解除/, true);
+  await choices.getByRole("button", { name: /開ける/ }).click();
+  await expect(page.getByText("SECRET END", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "もう一度接続する", exact: true }).click();
+  await readyForInput(page);
+  await expect(choices.getByRole("button", { name: /第2機械室へ行って/ })).toHaveClass(/record-choice/);
+});
+
+test("an incorrect release order interrupts immediately with the reconnect dialog", async ({ page }) => {
+  await connect(page);
+  await keyword(page, "7319");
+  await keyword(page, "隔離プロトコルを解除");
+  await keyword(page, "開ける", true);
+  const disconnected = page.getByRole("dialog", { name: "通信が途絶えました", exact: true });
+  await expect(disconnected).toBeVisible();
+  await expect(disconnected.getByRole("button", { name: "再接続する", exact: true })).toBeFocused();
+  await disconnected.getByRole("button", { name: "通信ログを見返す", exact: true }).click();
+  await expect(page.getByRole("log")).toContainText("PRESSURE DIFFERENTIAL EXCEEDED");
+  await expect(page.getByRole("timer")).not.toContainText("00:00");
+  await expect(page.getByText("SECRET END", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "再接続する", exact: true })).toBeVisible();
 });
 
 test("record persistence, invalid input, keyboard send and 320px layout", async ({ page }) => {

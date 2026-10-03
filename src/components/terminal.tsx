@@ -33,6 +33,7 @@ export function Terminal() {
   const [away, setAway] = useState(false);
   const [pulse, setPulse] = useState(false);
   const [blackout, setBlackout] = useState(false);
+  const [dismissedDisconnect, setDismissedDisconnect] = useState<string | null>(null);
   const sessionKey = `${generation}:${game.loopCount}`;
   const { count, chars, current, busy, skip } = usePlayback(game.messages, sessionKey, seen, remember, skipRead, reduced);
   const station = useRef<HTMLElement>(null);
@@ -43,6 +44,7 @@ export function Terminal() {
   const lastLoop = useRef(sessionKey);
   const complete = !busy && game.status === "ending";
   const lost = game.status === "disconnected";
+  const showDisconnect = lost && dismissedDisconnect !== sessionKey && !connecting;
   const choices = getChoices(game);
   const active = game.status === "playing" && !connecting;
   const hasUnknown = game.messages.slice(0, count).some((message) => message.speaker === "UNKNOWN");
@@ -113,7 +115,11 @@ export function Terminal() {
   };
 
   const openImage = (id: string) => setImageId(id);
-  const reconnectNow = () => { skip(); follow.current = true; connect(); };
+  const dismissDisconnect = () => {
+    setDismissedDisconnect(sessionKey); setPanel(null); setImageId(null);
+    setTimeout(() => log.current?.focus({ preventScroll: true }), 0);
+  };
+  const reconnectNow = () => { skip(); follow.current = true; setPanel(null); setImageId(null); connect(); };
 
   return <main ref={station} className={`station ${reduced ? "reduced-motion" : ""}`}>
     <section className={`terminal tier-${tier} ${pulse && !quiet ? "event-glitch" : ""} ${quiet ? "quiet-scene" : ""}`} aria-label="ABYSSAL-7 非常通信端末">
@@ -126,8 +132,8 @@ export function Terminal() {
           </p>
         </div>
         <nav className="terminal-menu" aria-label="端末メニュー">
-          <button className="text-button" onClick={() => setPanel("help")}>操作案内</button>
-          <button className="text-button memory-button" onClick={() => setPanel("memory")}>記録 <span>{String(game.knownFacts.length).padStart(2, "0")}</span></button>
+          <button className="menu-button" aria-haspopup="dialog" onClick={() => setPanel("help")}><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" /><path d="M8 7.5a2 2 0 0 1 4 0c0 1.5-2 1.5-2 3M10 13.5v.1" /></svg>操作案内</button>
+          <button className="menu-button memory-button" aria-haspopup="dialog" onClick={() => setPanel("memory")}><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3.5h10v13H5zM8 7h4M8 10h4M8 13h2" /></svg>記録 <span>{String(game.knownFacts.length).padStart(2, "0")}</span></button>
         </nav>
         <div className="clock-block">
           <span className="clock-caption">{game.containmentReleased ? "通信終了" : tier === "critical" ? "通信限界" : "残り時間"}</span>
@@ -187,15 +193,15 @@ export function Terminal() {
           <div className="command-content">
             {lost ? <div className="disconnect-controls">
               <p>通信は途絶えた。記録は残っている。</p>
-              <button className="primary-button" onClick={reconnectNow} disabled={connecting}>{connecting ? "再接続中…" : "再接続する"}<span aria-hidden="true">↻</span></button>
+              {!showDisconnect && <button className="primary-button" onClick={reconnectNow} disabled={connecting}>{connecting ? "再接続中…" : "再接続する"}<span aria-hidden="true">↻</span></button>}
             </div> : complete ? <div className="disconnect-controls">
               <p>記録を持って、もう一度。</p>
               <button className="primary-button" onClick={reconnectNow} disabled={connecting}>もう一度接続する<span aria-hidden="true">↻</span></button>
             </div> : <>
               <div className="choices" aria-label="応答の選択肢">
-                {choices.map((choice, index) => <button key={choice.id} disabled={busy || !active} onClick={() => submit(choice.id)}>
+                {choices.map((choice, index) => <button key={choice.id} className={choice.fromRecord ? "record-choice" : undefined} disabled={busy || !active} onClick={() => submit(choice.id)}>
                   <span className="choice-number" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
-                  <span className="choice-label">{choice.label}</span>
+                  <span className="choice-label">{choice.fromRecord && <span className="record-tag">記録より</span>}{choice.label}</span>
                   <span className="choice-cost" aria-label={`所要${choice.cost}秒`}>{choice.cost ? `−${choice.cost}s` : "↵"}</span>
                 </button>)}
               </div>
@@ -223,7 +229,13 @@ export function Terminal() {
       {blackout && !connecting && <div className="blackout" aria-hidden="true"><span>SIGNAL LOST</span></div>}
     </section>
 
-    {panel === "memory" && <Modal title="記録" onClose={() => setPanel(null)}>
+    {showDisconnect && <Modal key={`disconnect-${sessionKey}`} title="通信が途絶えました" className="disconnect-modal" showClose={false} onClose={dismissDisconnect}>
+      <div className="lost-signal" aria-hidden="true"><svg viewBox="0 0 240 40"><path d="M0 20h60l8-9 9 19 10-24 9 28 8-14h17m28 0h91" /><path className="signal-break" d="m121 10 15 20m0-20-15 20" /></svg><span>SIGNAL LOST</span></div>
+      <p>取得した記録を持って、<br />もう一度接続できます。</p>
+      <button autoFocus className="primary-button" onClick={reconnectNow}>再接続する<span aria-hidden="true">↻</span></button>
+      <button className="text-button review-log" onClick={dismissDisconnect}>通信ログを見返す</button>
+    </Modal>}
+    {!showDisconnect && panel === "memory" && <Modal title="記録" onClose={() => setPanel(null)}>
       {game.knownFacts.length === 0 ? <div className="empty-memory"><p>受信した情報が、ここに残ります。</p></div>
       : <div className="memory-list">{game.knownFacts.map((id) => FACTS[id] && <article key={id}>
         <span className="micro-label">{FACTS[id].category}</span>
@@ -234,7 +246,7 @@ export function Terminal() {
       </article>)}</div>}
       {active && <p className="panel-note">記録を開いている間も時間は進みます。</p>}
     </Modal>}
-    {panel === "help" && <Modal title="操作案内" onClose={() => setPanel(null)}>
+    {!showDisconnect && panel === "help" && <Modal title="操作案内" onClose={() => setPanel(null)}>
       <div className="manual">
         <dl>
           <dt>選ぶ、または入力する</dt>
@@ -242,17 +254,17 @@ export function Terminal() {
           <dt>1回の通信は3分</dt>
           <dd>実時間と行動の所要時間で残り時間が減ります。記録や映像を開いている間も進みます。</dd>
           <dt>知っていることは、次の通信でも</dt>
-          <dd>取得情報は「記録」に残ります。未取得でも正しい入力は有効。再読み込みすると、新しい接続から始まります。</dd>
+          <dd>情報が揃うと「記録より」と付いた選択肢が現れます。正解を知っていれば、未取得でも直接入力で進めます。</dd>
         </dl>
         <div className="display-settings"><span>画面の動き</span><button className="setting-button" aria-pressed={reduced} onClick={() => setReduced(!reduced)}>演出 {reduced ? "控えめ" : "標準"}</button></div>
         <button className="danger-button" onClick={() => setPanel("reset")}>記録を消して最初から</button>
       </div>
     </Modal>}
-    {panel === "reset" && <Modal title="記録を消去" onClose={() => setPanel(null)}>
+    {!showDisconnect && panel === "reset" && <Modal title="記録を消去" onClose={() => setPanel(null)}>
       <p>取得した情報と接続履歴を、このブラウザから消去します。</p>
       <div className="dialog-actions"><button className="text-button" onClick={() => setPanel(null)}>戻る</button><button className="danger-button" onClick={() => { reset(); setPanel(null); }}>消去して最初から</button></div>
     </Modal>}
-    {imageId && IMAGES[imageId] && <Modal title={IMAGES[imageId].title} className="image-modal" onClose={() => setImageId(null)}>
+    {!showDisconnect && imageId && IMAGES[imageId] && <Modal title={IMAGES[imageId].title} className="image-modal" onClose={() => setImageId(null)}>
       <Attachment id={imageId} expanded />
       {active && <p className="panel-note">映像を開いている間も時間は進みます。</p>}
     </Modal>}

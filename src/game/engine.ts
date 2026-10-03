@@ -1,4 +1,4 @@
-import { ACTIONS, KEYWORDS, LOOP_SECONDS, SCENE_CHOICES, SCRIPT, TRUE_FACTS } from "./scenario.ts";
+import { ACTIONS, CHOICE_RECORDS, KEYWORDS, LOOP_SECONDS, SCENE_CHOICES, SCRIPT, TRUE_FACTS } from "./scenario.ts";
 import type { Choice, GameState, ScriptLine } from "./types.ts";
 
 export type { Choice, GameState, Message, Ending } from "./types.ts";
@@ -79,7 +79,7 @@ export function advanceTime(state: GameState, seconds: number): GameState {
 }
 
 const POWER_REQUIRED = new Set([
-  "open_door", "tank", "vitals", "brighten", "audio", "security", "next_security",
+  "open_door", "inspect_controls", "tank", "vitals", "brighten", "audio", "security", "next_security",
   "central", "protocol", "pressure", "pressure_details", "stop_pump", "comms", "history",
   "signal", "maintain", "reinforce", "request_release", "release", "refuse", "alternative",
 ]);
@@ -226,14 +226,34 @@ export function getChoices(state: GameState): Choice[] {
   if (state.status !== "playing") return [];
   let ids = [...(SCENE_CHOICES[state.scene] ?? SCENE_CHOICES.contact)];
   if (state.doomed) ids = ["wait"];
-  if (state.scene === "intro" && state.knownFacts.includes("F02")) ids.push("go_machine");
-  ids = ids.filter((id) => {
-    if (id === "enable_power" && !state.knownFacts.includes("F03")) return false;
-    if (id === "question_identity" && (!state.knownFacts.includes("F12") || !state.knownFacts.includes("F13") || state.truthClosed)) return false;
+
+  // Knowledge governs what the terminal suggests, not what the player can do.
+  const recordSupports = (id: string): boolean => {
+    if (id === "stop_pump" && state.hasPumpClue) return true;
+    return (CHOICE_RECORDS[id] ?? []).every((fact) => state.knownFacts.includes(fact));
+  };
+  const physicallyAvailable = (id: string): boolean => {
+    if (POWER_REQUIRED.has(id) && !state.powerEnabled) return false;
+    if (TRUTH_ACTIONS.has(id) && state.truthClosed) return false;
+    if (id === "go_machine" && (state.powerEnabled || state.location === "machine")) return false;
+    if (id === "enable_power" && state.powerEnabled) return false;
+    if (id === "stop_pump" && state.drainageDisabled) return false;
     return true;
-  });
+  };
+  ids = ids.filter((id) => recordSupports(id) && physicallyAvailable(id));
+
+  // Keep useful exploration and a way back while presenting at most one next
+  // rescue step in the central menu. The protocol screen still permits mistakes.
+  if (state.scene === "contact" && ids.includes("go_machine")) ids = ids.filter((id) => id !== "escape");
+  if (state.scene === "questions" && ids.includes("go_machine")) ids = ids.filter((id) => id !== "power_location");
+  if (state.scene === "powered" && ids.includes("central")) ids = ids.filter((id) => id !== "inspect_controls");
+  if (state.scene === "central") {
+    const nextStep = ids.includes("stop_pump") ? "stop_pump" : ids.includes("request_release") ? "request_release" : "protocol";
+    ids = ids.filter((id) => !["stop_pump", "request_release", "protocol"].includes(id) || id === nextStep);
+  }
+  if (state.scene === "protocol" && ids.includes("request_release")) ids = ids.filter((id) => id !== "pressure");
   return ids.slice(0, 4).map((id) => {
     const action = ACTIONS[id];
-    return { id: action.id, label: action.label, cost: action.cost };
+    return { id: action.id, label: action.label, cost: action.cost, ...(CHOICE_RECORDS[id] ? { fromRecord: true } : {}) };
   });
 }
